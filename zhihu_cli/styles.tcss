@@ -1,0 +1,125 @@
+/* zhihu-cli theme: simple, modern, compact */
+
+Screen {
+    background: #0f1115;
+}
+
+TopBar {
+    width: 100%;
+    height: 1;
+    background: #171a21;
+    padding: 0 1;
+}
+
+Footer {
+    background: #171a21;
+    color: #8a93a3;
+}
+
+StatusLine {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    color: #38bdf8;
+    text-style: bold;
+    background: #171a21;
+}
+
+#feed {
+    height: 1fr;
+}
+
+.hint {
+    margin: 1 2;
+    color: #8a93a3;
+}
+
+Card {
+    margin: 0 1 1 1;
+    padding: 1 2;
+    border: round #232a36;
+    background: #141821;
+}
+
+Card:hover {
+    background: #1a202c;
+    border: round #38bdf8;
+}
+
+Card:focus {
+    border: round #38bdf8;
+    background: #182130;
+}
+
+#content {
+    height: 1fr;
+}
+
+.title {
+    margin: 0 1;
+}
+
+.meta {
+    margin: 0 1;
+    color: #8a93a3;
+}
+
+.rule {
+    color: #2a3140;
+    margin: 0 0 1 0;
+}
+
+.imgsec {
+    height: auto;
+    margin: 1 0 0 0;
+}
+
+.imgbtn {
+    height: 1;
+    border: none;
+    min-width: 0;
+    padding: 0 2;
+    margin: 0 1;
+    text-align: left;
+    content-align: left middle;
+}
+
+.row {
+    height: auto;
+    margin: 1;
+}
+
+#open-web {
+    height: 1;
+    border: none;
+    min-width: 0;
+    text-align: left;
+    content-align: left middle;
+}
+
+/* comments popup */
+#cmt-panel {
+    width: 100%;
+    height: 100%;
+    background: #12161f;
+    border: round #38bdf8;
+    padding: 1 1;
+}
+
+.cmt-title {
+    height: 1;
+    background: #171a21;
+    padding: 0 1;
+    text-style: bold;
+}
+
+#comments {
+    height: 1fr;
+    margin-top: 1;
+}
+
+.comment {
+    margin: 0 1 0 1;
+    padding: 1 0 1 0;
+    border-bottom: solid #1e2430;
+}

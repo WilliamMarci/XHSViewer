@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zhihu-cli"
+version = "0.2.0"
+description = "知乎 CLI 客户端：推荐流卡片浏览、终端内图片查看（Kitty 协议，支持 Ghostty）"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "textual>=0.86,<0.90",
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "pillow>=10.0",
+    "pycryptodome>=3.20",
+]
+
+[project.scripts]
+zhihu = "zhihu_cli.__main__:main"
+
+[tool.setuptools]
+packages = ["zhihu_cli"]
+
+[tool.setuptools.package-data]
+zhihu_cli = ["*.tcss"]
