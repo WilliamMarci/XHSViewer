@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 
 CONFIG_DIR = Path(
@@ -16,12 +17,22 @@ DEFAULTS = {
     "show_math_svg": False,
     "expand_images_by_default": False,
     "history_enabled": True,
-    # False: /tmp/zhihu-viewer/history.json; True: config directory.
+    # False: /tmp/zhihuviewer/history.json; True: config directory.
     "history_persistent": False,
     "auto_refresh_recommend": False,
     # 正文底部「尾端按钮」：browser（在浏览器中打开）/ next_answer（下一个回答）/ none（隐藏）
     "content_end_button": "browser",
+    # 缓存根目录；为空时使用系统临时目录下的 zhihuviewer（/tmp/zhihuviewer）
+    "cache_dir": "",
 }
+
+
+def cache_root() -> Path:
+    """Cache root: config ``cache_dir`` when set, else ``/tmp/zhihuviewer``."""
+    override = str(get("cache_dir", "") or "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path(tempfile.gettempdir()) / "zhihuviewer"
 
 
 def load() -> dict:

@@ -10,7 +10,6 @@ import select
 import sqlite3
 import subprocess
 import sys
-import tempfile
 import time
 import webbrowser
 from dataclasses import dataclass, field
@@ -18,6 +17,8 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
+
+from .config import cache_root
 
 UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -34,13 +35,15 @@ CONFIG_DIR = Path(
 COOKIE_FILE = CONFIG_DIR / "cookies.json"
 LEGACY_COOKIE_FILE = Path("cookies.txt")  # old netscape format, kept for compat
 
-IMAGE_CACHE_DIR = Path(tempfile.gettempdir()) / "zhihu-viewer" / "img"
-
 _IMG_RE = re.compile(r"<img[^>]+>", re.I)
 
 
+def _image_cache_dir() -> Path:
+    return cache_root() / "img"
+
+
 def _image_cache_key(url: str) -> Path:
-    return IMAGE_CACHE_DIR / hashlib.md5(url.encode()).hexdigest()
+    return _image_cache_dir() / hashlib.md5(url.encode()).hexdigest()
 
 
 def _image_cache_get(url: str) -> bytes | None:
@@ -64,7 +67,7 @@ def _image_cache_get(url: str) -> bytes | None:
 
 def _image_cache_put(url: str, data: bytes) -> None:
     try:
-        IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _image_cache_dir().mkdir(parents=True, exist_ok=True)
         _image_cache_key(url).write_bytes(data)
     except Exception:
         pass
@@ -96,6 +99,7 @@ class FeedItem:
     qid: str = ""  # question id (answers)
     aid: str = ""  # answer id (answers / articles)
     rank: int = 0  # hot-list ranking (0 = not a ranked feed)
+    search_match: bool = False  # True for search results (excerpt has <em>)
 
     @property
     def badge(self) -> str:
@@ -599,6 +603,7 @@ class ZhihuSession:
             item = normalize_item(obj)
             if not item:
                 continue
+            item.search_match = True
             key = item.url or item.rid
             if key in seen:
                 continue

@@ -317,8 +317,7 @@ class SearchScreen(Screen):
         Binding("o", "open_browser", "浏览器"),
         Binding("g", "go_top", "顶部", show=False),
         Binding("G", "go_bottom", "底部", show=False),
-        Binding("escape", "back", "返回"),
-        Binding("q,ctrl+c", "quit_app", "退出"),
+        Binding("escape,q", "back", "返回"),
     ]
 
     def __init__(self, client: ZhihuSession, query: str, user: dict | None = None):

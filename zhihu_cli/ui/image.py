@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
+import subprocess
+import tempfile
 import webbrowser
 
 from rich.text import Text
@@ -14,8 +18,52 @@ from textual.widgets import Button, Static
 
 from .. import kitty
 from ..net import ZhihuSession
-from .constants import ICON_IMAGE
+from .constants import ICON_COPY, ICON_IMAGE
 from .widgets import open_image_with_system, system_viewer_notice
+
+
+def copy_image_bytes(data: bytes) -> tuple[bool, str]:
+    """Put raw image bytes on the system clipboard (wl-copy/xclip/xsel/pngpaste).
+
+    Returns (ok, message).
+    """
+    ext = ".png"
+    mime = "image/png"
+    try:
+        from io import BytesIO
+
+        from PIL import Image as PILImage
+
+        im = PILImage.open(BytesIO(data))
+        mime = {
+            "PNG": "image/png",
+            "JPEG": "image/jpeg",
+            "GIF": "image/gif",
+            "WEBP": "image/webp",
+            "BMP": "image/bmp",
+        }.get(im.format, "application/octet-stream")
+        ext = ".png" if im.format == "PNG" else f".{(im.format or 'bin').lower()}"
+    except Exception:
+        pass
+    fd, path = tempfile.mkstemp(suffix=ext, prefix="zhihu-copy-")
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    try:
+        if shutil.which("wl-copy"):
+            subprocess.run(["wl-copy", "--type", mime, path], check=True)
+            return True, "图片已复制到剪切板"
+        if shutil.which("xclip"):
+            subprocess.run(["xclip", "-selection", "clipboard", "-t", mime, path], check=True)
+            return True, "图片已复制到剪切板"
+        if shutil.which("xsel"):
+            subprocess.run(["xsel", "--clipboard", "--input", path], check=True)
+            return True, "图片已复制到剪切板"
+        if shutil.which("pngpaste"):
+            subprocess.run(["pngpaste", path], check=True)
+            return True, "图片已复制到剪切板"
+    except Exception:
+        pass
+    return False, "未找到系统剪贴板工具"
 
 
 class ViewerHint(Static, can_focus=True):
@@ -293,12 +341,20 @@ class ImageSection(Vertical):
         self._img_id = (id(self) ^ 0x35A71E) & 0xFFFFFF or 1
         self._loaded = False
         self._loading = False
+        self._img_data: bytes | None = None
 
     def compose(self) -> ComposeResult:
         self._btn = Button(f"{ICON_IMAGE} 图片 {self.no}", classes="imgbtn")
         self._collapse_btn = Button("折叠图片", classes="img-collapse")
         self._collapse_btn.display = False
-        yield Horizontal(self._collapse_btn, self._btn, classes="img-actions")
+        self._copy_btn = Button(ICON_COPY, classes="img-copy")
+        self._copy_btn.display = False
+        yield Horizontal(
+            self._collapse_btn,
+            self._btn,
+            self._copy_btn,
+            classes="img-actions",
+        )
         yield Static("", classes="img-inline")
         yield Static("", classes="img-caption")
 
@@ -308,6 +364,7 @@ class ImageSection(Vertical):
         self._btn.label = f"{ICON_IMAGE} 加载中…"
         try:
             data = await asyncio.to_thread(self.client.fetch_image_bytes, self.urls[0])
+            self._img_data = data
             from io import BytesIO
             from PIL import Image as PILImage
 
@@ -333,6 +390,7 @@ class ImageSection(Vertical):
             self._loaded = True
             self._btn.label = f"{ICON_IMAGE} 放大"
             self._collapse_btn.display = True
+            self._copy_btn.display = True
         except Exception as e:
             grid.update(Text(f"图片加载失败：{e}", style="red"))
             self._btn.label = f"{ICON_IMAGE} 图片 {self.no}（重试）"
@@ -348,6 +406,9 @@ class ImageSection(Vertical):
 
     @on(Button.Pressed)
     def _on_pressed(self, event: Button.Pressed):
+        if event.button is self._copy_btn:
+            self._copy_image()
+            return
         if event.button is self._collapse_btn:
             self._collapse_inline()
             return
@@ -382,8 +443,24 @@ class ImageSection(Vertical):
         grid.styles.height = "auto"
         self.query_one(".img-caption", Static).update("")
         self._loaded = False
+        self._img_data = None
         self._btn.label = f"{ICON_IMAGE} 图片 {self.no}"
         self._collapse_btn.display = False
+        self._copy_btn.display = False
+
+    def _copy_image(self):
+        url = self.urls[0]
+        data = getattr(self, "_img_data", None)
+        if not data:
+            self.app.copy_to_clipboard(url)
+            self.app.notify("已复制图片链接", timeout=2)
+            return
+        ok, msg = copy_image_bytes(data)
+        if ok:
+            self.app.notify(msg, timeout=3)
+        else:
+            self.app.copy_to_clipboard(url)
+            self.app.notify("未找到系统剪贴板工具，已复制图片链接", timeout=3)
 
     async def _fallback_open(self):
         try:

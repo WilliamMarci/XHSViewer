@@ -67,6 +67,40 @@ _CODE_RE = re.compile(
 )
 
 
+# Subtle highlight for the matched portion of search results (<em>…</em>)
+SEARCH_HILITE = "bold #fbbf24"
+
+
+def parse_highlighted(html: str, base: str = "") -> Text:
+    """Parse a small HTML snippet into a Text, highlighting <em> spans.
+
+    Used for search result titles/excerpts: zhihu wraps the matched part
+    of the query in <em>, which is rendered with a subtle highlight while
+    the rest of the text keeps ``base``.
+    """
+    soup = BeautifulSoup(html or "", "lxml")
+
+    def walk(node) -> Text:
+        out = Text()
+        for child in node.children:
+            if isinstance(child, NavigableString):
+                out.append(str(child), style=base or None)
+            elif isinstance(child, Tag):
+                name = child.name
+                if name in _SKIP_TAGS or name in ("script", "style"):
+                    continue
+                if name == "br":
+                    out.append("\n")
+                    continue
+                if name == "em":
+                    out.append(child.get_text(), style=SEARCH_HILITE)
+                    continue
+                out.append_text(walk(child))
+        return out
+
+    return walk(soup)
+
+
 def highlight_code(code: str) -> Text:
     """Lightweight semantic highlighting for code blocks."""
     t = Text(style=_CODE_BASE)
@@ -122,6 +156,7 @@ class Block:
     items: list[Text] = field(default_factory=list)
     rows: list[list[str]] = field(default_factory=list)
     caption: str = ""
+    lang: str = ""  # code language (e.g. python) for <pre> blocks
     # clickable link spans: (start, end, url) into self.text.plain
     links: list[tuple[int, int, str]] = field(default_factory=list)
     # per-item link spans for list blocks (offsets relative to each item)
@@ -228,6 +263,15 @@ def find_urls(text: str) -> list[tuple[int, int, str]]:
     return out
 
 
+def _code_lang(tag: Tag) -> str:
+    """Best-effort language detection from <pre>/<code> class names."""
+    for t in (tag, *tag.find_all("code")):
+        cls = _classes(t)
+        for m in re.findall(r"(?:language|lang)[-_]([\w+#]+)", cls, re.I):
+            return m
+    return ""
+
+
 def inline(node: Tag, links: list[tuple[int, int, str]] | None = None) -> Text:
     """Render inline content of a tag into a rich Text.
 
@@ -312,6 +356,18 @@ def inline(node: Tag, links: list[tuple[int, int, str]] | None = None) -> Text:
                     continue
                 t.append_text(sub)
                 continue
+            if name == "code":
+                # Inline code must stay inline: collapse any whitespace /
+                # newlines (HTML source may put the code text on its own line).
+                code_links: list[tuple[int, int, str]] = []
+                sub = inline(child, code_links)
+                plain = re.sub(r"\s+", " ", sub.plain).strip(" ")
+                sub = Text(plain, style=f"{CODE_COLOR} on {CODE_BG}")
+                offset = len(t.plain)
+                t.append_text(sub)
+                if links is not None:
+                    links.extend((s + offset, e + offset, url) for s, e, url in code_links)
+                continue
             child_links: list[tuple[int, int, str]] = []
             sub = inline(child, child_links)
             style = _INLINE_STYLE.get(name)
@@ -340,11 +396,27 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
         blocks.append(Block("img", urls=urls, caption=caption))
 
     def walk(node: Tag):
+        # Consecutive inline children (text, <code>, <a>, <strong>, <span>…)
+        # are accumulated into one paragraph so inline code stays inline
+        # instead of becoming its own block.
+        pending: Text | None = None
+        pending_links: list[tuple[int, int, str]] = []
+
+        def flush():
+            nonlocal pending, pending_links
+            if pending is not None and pending.plain.strip():
+                blocks.append(Block("p", pending, links=pending_links))
+            pending = None
+            pending_links = []
+
         for child in node.children:
             if isinstance(child, NavigableString):
                 s = str(child).strip()
-                if s:
-                    blocks.append(Block("p", Text(s)))
+                if not s:
+                    continue
+                if pending is None:
+                    pending = Text()
+                pending.append(s)
                 continue
             if not isinstance(child, Tag):
                 continue
@@ -352,12 +424,14 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
             if name in _SKIP_TAGS:
                 continue
             if name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+                flush()
                 h_links: list[tuple[int, int, str]] = []
                 t = inline(child, h_links)
                 color = H_COLORS.get(name)
                 t.stylize(f"bold {color}" if color else "bold")
                 blocks.append(Block("h", t, links=h_links))
             elif name == "p":
+                flush()
                 imgs = [
                     img_src(i)
                     for i in child.find_all("img")
@@ -379,15 +453,18 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
                 if imgs:
                     add_img(imgs)
             elif name == "blockquote":
+                flush()
                 q_links: list[tuple[int, int, str]] = []
                 t = inline(child, q_links)
                 if t.plain.strip():
                     t.stylize(f"italic {QUOTE_COLOR}")
                     blocks.append(Block("quote", t, links=q_links))
             elif name == "pre":
+                flush()
                 t = highlight_code(child.get_text())
-                blocks.append(Block("code", t))
+                blocks.append(Block("code", t, lang=_code_lang(child)))
             elif name in ("ul", "ol"):
+                flush()
                 items: list[Text] = []
                 item_links: list[list[tuple[int, int, str]]] = []
                 ordered = name == "ol"
@@ -401,6 +478,7 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
                     items.append(t)
                 blocks.append(Block("list", items=items, item_links=item_links))
             elif name == "img":
+                flush()
                 if is_equation(child):
                     # display (block) formula -> math text block
                     blocks.append(Block("math", math_text(child, inline=False)))
@@ -409,6 +487,7 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
                 else:
                     add_img([img_src(child)], caption=(child.get("alt") or "").strip())
             elif name == "figure":
+                flush()
                 eqs = [
                     i
                     for i in child.find_all("img")
@@ -430,8 +509,10 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
                         Block("figcap", Text(caption, style=f"dim {DIM}"), links=cap_links)
                     )
             elif name == "hr":
+                flush()
                 blocks.append(Block("hr", Text("━" * 16, style=f"dim {DIM}")))
             elif name == "table":
+                flush()
                 rows: list[list[str]] = []
                 for tr in child.find_all("tr"):
                     cells = [
@@ -442,6 +523,7 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
             elif name == "a":
                 # Block link cards are top-level empty anchors. Calling
                 # inline(child) would only inspect their (empty) children.
+                flush()
                 label = (
                     child.get_text(strip=True)
                     or child.get("data-text")
@@ -455,12 +537,23 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
                     links = [(0, len(label), urljoin(BASE, href))] if href else []
                     blocks.append(Block("p", text, links=links))
             elif name in ("div", "section", "center", "article", "details", "summary"):
+                flush()
                 walk(child)
             else:
-                e_links: list[tuple[int, int, str]] = []
-                t = inline(child, e_links)
-                if t.plain.strip():
-                    blocks.append(Block("p", t, links=e_links))
+                # inline element (code/strong/em/span/br/…): merge into the
+                # current paragraph run
+                sub_links: list[tuple[int, int, str]] = []
+                sub = inline(child, sub_links)
+                if not sub.plain.strip():
+                    continue
+                if pending is None:
+                    pending = Text()
+                base = len(pending.plain)
+                for s, e, u in sub_links:
+                    pending_links.append((base + s, base + e, u))
+                pending.append_text(sub)
+
+        flush()
 
     body = soup.body or soup
     walk(body)

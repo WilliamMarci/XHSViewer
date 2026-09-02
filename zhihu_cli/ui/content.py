@@ -26,6 +26,7 @@ from .widgets import (
     AnswerTopBar,
     BottomBar,
     ClickableText,
+    CodeHead,
     ContentScroll,
     LinkButton,
     PageSearchBar,
@@ -185,6 +186,9 @@ class ContentScreen(Screen):
                     if not link_only:
                         content.mount(ClickableText(b.text, links=b.links, classes="quoteblock"))
                 elif b.kind == "code":
+                    content.mount(
+                        CodeHead(b.text.plain if b.text else "", b.lang)
+                    )
                     content.mount(Static(b.text, classes="codeblock"))
                 elif b.kind == "hr":
                     content.mount(Static(b.text))
@@ -382,18 +386,15 @@ class ContentScreen(Screen):
             self._ans_switching = False
 
     def check_bottom(self):
-        """Small toast when the answer content reaches its end."""
-        if self._bottom_notified:
+        """Small toast when an answer's content reaches its end."""
+        if self._bottom_notified or self.item.kind != "answer":
             return
         content = self.query_one("#content")
         if content.max_scroll_y is None:
             return
         if content.scroll_y >= content.max_scroll_y - 1:
             self._bottom_notified = True
-            hint = "已到回答底部"
-            if self.item.kind == "answer":
-                hint += " · n 下一个回答 · N 上一个 · c 评论"
-            self.notify(hint, timeout=4)
+            self.notify("已到回答底部 · n 下一个回答 · N 上一个 · c 评论", timeout=4)
 
     # -- actions ----------------------------------------------------------
 

@@ -206,7 +206,7 @@ HistoryAnswerRow {
 
 HistoryAnswerRow:hover,
 HistoryAnswerRow:focus {
-    background: $surface;
+    background: $boost;
     color: $accent;
     text-style: bold;
 }
@@ -353,6 +353,23 @@ AnswerHeader {
     content-align: left middle;
 }
 
+/* copy-image button sitting right next to the image button (not right-aligned) */
+.img-copy {
+    width: 4;
+    height: 1;
+    min-width: 0;
+    border: none;
+    padding: 0;
+    background: $boost;
+    color: $text;
+    content-align: center middle;
+}
+
+.img-copy:hover {
+    background: $accent;
+    color: $text;
+}
+
 .img-actions {
     width: 100%;
     height: 1;
@@ -425,6 +442,37 @@ AnswerHeader {
     padding: 0 2;
     margin: 0;
     width: 100%;
+}
+
+/* code block header row: language label + right-aligned copy button */
+.code-head {
+    height: 1;
+    margin: 0;
+    width: 100%;
+}
+
+.code-lang {
+    width: 1fr;
+    height: 1;
+    padding: 0 1 0 2;
+    color: $text-muted;
+    text-style: italic;
+}
+
+.code-copy {
+    width: 4;
+    height: 1;
+    min-width: 0;
+    border: none;
+    padding: 0;
+    background: $boost;
+    color: $text;
+    content-align: center middle;
+}
+
+.code-copy:hover {
+    background: $accent;
+    color: $text;
 }
 
 /* blockquote: full-width background block with a continuous left bar,

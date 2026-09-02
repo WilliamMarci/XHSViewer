@@ -20,9 +20,11 @@ from textual.screen import Screen
 from textual.widgets import Button, Input, Static
 
 from ..net import FeedItem, ZhihuSession, fmt_num, fmt_time
+from ..htmlparse import parse_highlighted
 from .constants import (
     BADGE_COLOR,
     ICON_COMMENT,
+    ICON_COPY,
     ICON_IMAGE,
     ICON_LINK,
     ICON_PLAY,
@@ -349,6 +351,15 @@ class Card(Static, can_focus=True):
         self.item = item
         self.show_title = show_title
         self._search_highlight: tuple[int, int] | None = None
+        # Search results wrap the matched part of the query in <em>; pre-parse
+        # so those spans render with a subtle highlight instead of raw tags.
+        self._title_text: Text | None = None
+        self._excerpt_text: Text | None = None
+        if item.search_match:
+            if "<" in (item.title or ""):
+                self._title_text = parse_highlighted(item.title, "bold")
+            if "<" in (item.excerpt or ""):
+                self._excerpt_text = parse_highlighted(item.excerpt, "#94a3b8")
 
     def render(self) -> Text:
         it = self.item
@@ -362,10 +373,16 @@ class Card(Static, can_focus=True):
         t.append(f" {it.badge} ", style=f"bold white on {color}")
         if self.show_title:
             t.append("  ")
-            t.append(it.title, style="bold")
+            if self._title_text is not None:
+                t.append_text(self._title_text)
+            else:
+                t.append(it.title, style="bold")
         t.append("\n")
         if it.excerpt:
-            t.append(it.excerpt, style="#94a3b8")
+            if self._excerpt_text is not None:
+                t.append_text(self._excerpt_text)
+            else:
+                t.append(it.excerpt, style="#94a3b8")
             t.append("\n")
         t.append(f" {it.author or '匿名用户'}", style="bold #eab308")
         if it.votes:
@@ -765,6 +782,32 @@ class LinkButton(Button):
             label.append(f" {ICON_LINK}  {url}", style="underline #7dd3fc")
         super().__init__(label, classes="linkbtn", **kwargs)
         self.url = url
+
+
+class CodeHead(Horizontal):
+    """One-row header above a code block: optional language + copy button.
+
+    The copy button is 4 cells wide, one row tall, right-aligned; clicking
+    copies the whole code block to the clipboard (OSC 52).
+    """
+
+    def __init__(self, code: str, lang: str = "", **kwargs):
+        super().__init__(classes="code-head", **kwargs)
+        self.code = code
+        self.lang = (lang or "").strip()
+
+    def compose(self) -> ComposeResult:
+        # Language label is the flexible element so the copy button always
+        # sits inside the screen at the right edge (a separate 1fr fill
+        # would push the button off-screen).
+        yield Static(f" {self.lang} " if self.lang else "", classes="code-lang")
+        yield Button(ICON_COPY, classes="code-copy")
+
+    @on(Button.Pressed, ".code-copy")
+    def _copy_code(self, event: Button.Pressed):
+        if self.code:
+            self.app.copy_to_clipboard(self.code)
+            self.app.notify("已复制代码", timeout=2)
 
 
 class ContentScroll(VerticalScroll):

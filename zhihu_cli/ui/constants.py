@@ -9,6 +9,7 @@ ICON_IMAGES = "🖼"         # emoji: frame with picture
 ICON_LINK = "\U000f0337"   # nf-md-link (v3)
 ICON_PLAY = "\U000f040a"   # nf-md-play (v3)
 ICON_COMMENT = "\U000f017a"  # nf-md-comment (v3)
+ICON_COPY = "\U0001f5ce"     # 🗎 copy (U+1F5CE)
 
 BADGE_COLOR = {
     "回答": "#3b82f6",

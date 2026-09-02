@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 import time
 from pathlib import Path
 
@@ -12,7 +11,7 @@ from . import config
 def path() -> Path:
     if config.get("history_persistent", False):
         return config.CONFIG_DIR / "history.json"
-    return Path(tempfile.gettempdir()) / "zhihu-viewer" / "history.json"
+    return config.cache_root() / "history.json"
 
 
 def load() -> list[dict]:

@@ -5,13 +5,23 @@ Exposes the same public names the old single-file ``ui.py`` did, so
 """
 from __future__ import annotations
 
-from .constants import BADGE_COLOR, CUSTOM_THEMES, ICON_COMMENT, ICON_IMAGE, ICON_IMAGES, ICON_LINK, ICON_PLAY
+from .constants import (
+    BADGE_COLOR,
+    CUSTOM_THEMES,
+    ICON_COMMENT,
+    ICON_COPY,
+    ICON_IMAGE,
+    ICON_IMAGES,
+    ICON_LINK,
+    ICON_PLAY,
+)
 from .widgets import (
     AnswerHeader,
     AnswerTopBar,
     BottomBar,
     Card,
     ClickableText,
+    CodeHead,
     CommentScroll,
     ContentScroll,
     FeedScroll,
@@ -45,6 +55,7 @@ __all__ = [
     "BADGE_COLOR",
     "CUSTOM_THEMES",
     "ICON_COMMENT",
+    "ICON_COPY",
     "ICON_IMAGE",
     "ICON_IMAGES",
     "ICON_LINK",
@@ -76,6 +87,7 @@ __all__ = [
     "FeedScroll",
     "ClickableText",
     "LinkButton",
+    "CodeHead",
     "ContentScroll",
     "CommentScroll",
     "open_image_with_system",
