@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""独立图片显示演示（Kitty 图片协议，支持 Ghostty）。
+"""独立图片显示演示（Kitty 协议 unicode placeholder，支持 Ghostty/kitty/tmux）。
 
 仅负责在终端中显示图片，用于确认图片可以正常打开。
+实现方式与 yazi/ratatui 一致：U=1 传输 + U+10EEEE 占位符网格。
 
 用法：
     python demo_image.py [图片文件或URL]        # 默认生成一张测试图
-    python demo_image.py                        # 内置测试图（渐变+文字）
 
 按键：
     + / -      放大 / 缩小
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
 import sys
 import termios
 import time
@@ -75,7 +76,7 @@ def main() -> int:
     if cell is None:
         cell = (8, 16)
     cw, ch = cell
-    print(f"终端单元尺寸: {cw}x{ch}px，检测图片协议…", file=sys.stderr)
+    print(f"终端单元尺寸: {cw}x{ch}px", file=sys.stderr)
 
     data, desc = load_image(arg)
     from PIL import Image as PILImage
@@ -85,7 +86,7 @@ def main() -> int:
         im = im.convert("RGB")
     print(f"图片: {im.size[0]}x{im.size[1]}px  ({desc})", file=sys.stderr)
 
-    img_id = "demo1"
+    img_id = (os.getpid() & 0xFFFF) ^ 0x5A5A
     scale = 1.0
     pan_x = 0.0
     pan_y = 0.0
@@ -98,37 +99,31 @@ def main() -> int:
             os.write(1, s.encode("utf-8", "ignore"))
 
         def viewport() -> tuple[int, int]:
-            import shutil
-
             cols, rows = shutil.get_terminal_size()
             return max(1, (cols - 2) * cw), max(1, (rows - 4) * ch)
 
         def emit() -> None:
             nonlocal pan_x, pan_y
             vw, vh = viewport()
-            w, h = im.size
-            fit = min(vw / w, vh / h, 1.0)
-            dw = max(1, int(w * fit * scale))
-            dh = max(1, int(h * fit * scale))
-            sview_w = min(dw, vw)
-            sview_h = min(dh, vh)
-            px = min(max(0, dw - sview_w), max(0, int(pan_x)))
-            py = min(max(0, dh - sview_h), max(0, int(pan_y)))
-            cols = max(1, sview_w // cw)
-            rows = max(1, sview_h // ch)
-            resized = im.resize((dw, dh), PILImage.LANCZOS)
-            buf = io.BytesIO()
-            resized.save(buf, "PNG", optimize=True)
-            png = buf.getvalue()
-            write(kitty.transmit_image(png, img_id, dw, dh))
-            import shutil
-
+            iw, ih = im.size
+            fit = min(vw / iw, vh / ih, 1.0)
+            z = max(0.4, scale)
+            disp_w = max(1, min(vw, int(iw * fit * z)))
+            disp_h = max(1, min(vh, int(ih * fit * z)))
+            src_w = max(1.0, min(iw, disp_w / (fit * z)))
+            src_h = max(1.0, min(ih, disp_h / (fit * z)))
+            sx = min(max(0.0, iw - src_w), max(0.0, pan_x))
+            sy = min(max(0.0, ih - src_h), max(0.0, pan_y))
+            cols = max(1, disp_w // cw)
+            rows = max(1, disp_h // ch)
+            crop = im.crop((int(sx), int(sy), int(sx + src_w), int(sy + src_h)))
+            resized = crop.resize((disp_w, disp_h), PILImage.LANCZOS)
+            rgba = resized.convert("RGBA").tobytes()
+            write(kitty.transmit_rgba(rgba, img_id, disp_w, disp_h))
             tcols, trows = shutil.get_terminal_size()
             row = max(0, (trows - rows) // 2 - 1)
             col = max(0, (tcols - cols) // 2)
-            write(f"\x1b[{row + 1};{col + 1}H" + kitty.place_image(
-                img_id, px, py, sview_w, sview_h, cols, rows
-            ))
+            write(f"\x1b[{row + 1};{col + 1}H" + kitty.placeholder_cells(img_id, cols, rows))
 
         def cleanup() -> None:
             try:
@@ -136,9 +131,13 @@ def main() -> int:
             except Exception:
                 pass
 
-        write("\x1b[2J\x1b[H")  # clear screen
+        write("\x1b[2J\x1b[H")
         emit()
-        print(f"\x1b[{1};1H\x1b[K 图片演示: 按 + / - 缩放，hjkl 平移，q 退出", end="", flush=True)
+        print(
+            f"\x1b[1;1H\x1b[K 图片演示: 缩放 1.00x  ({desc})  + / - 缩放  hjkl 平移  q 退出",
+            end="",
+            flush=True,
+        )
         write("\x1b[2;1H\x1b[K")
 
         while True:

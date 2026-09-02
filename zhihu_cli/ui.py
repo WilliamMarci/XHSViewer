@@ -17,7 +17,7 @@ from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, Footer, Rule, Static
 
 from . import kitty
-from .htmlparse import DIM, Block, parse_html, table_to_text
+from .htmlparse import Block, parse_html, table_to_text
 from .net import (
     FeedItem,
     NotLoggedIn,
@@ -125,7 +125,7 @@ class AnswerHeader(Static):
         if it.url:
             t.append(f"  {ICON_LINK} ", style="dim")
             t.append(it.url, style="underline #5eb4f8")
-            t.append("  （Ctrl+点击打开）", style=f"dim {DIM}")
+            #t.append("  （Ctrl+点击打开）", style="dim #8a93a3")
         return t
 
     def on_click(self, event: Click):
@@ -392,7 +392,7 @@ class ViewerHint(Static, can_focus=True):
 
 
 class ImageViewerScreen(ModalScreen[None]):
-    """Popup image viewer (Kitty protocol).
+    """Popup image viewer (Kitty protocol, unicode placeholders).
 
     + / - zoom, hjkl / arrows pan, n / p switch image, o open in browser,
     Esc / q close.
@@ -427,7 +427,7 @@ class ImageViewerScreen(ModalScreen[None]):
         self.index = index
         self.caption = caption
         self._img = None  # PIL image
-        self._img_id = f"v{id(self):x}"
+        self._img_id = (id(self) ^ 0x7F4A7C15) & 0xFFFFFF
         self._scale = 1.0
         self._pan_x = 0.0
         self._pan_y = 0.0
@@ -438,6 +438,10 @@ class ImageViewerScreen(ModalScreen[None]):
         yield ViewerHint(
             "  + / - 缩放 · hjkl/方向键 移动 · n/p 切换 · o 浏览器 · Esc 返回",
             id="iviewer-hint",
+        )
+        yield Vertical(
+            Static("", id="iviewer-grid"),
+            id="iviewer-stage",
         )
 
     def on_mount(self):
@@ -470,10 +474,9 @@ class ImageViewerScreen(ModalScreen[None]):
         cw, ch = self.app.cell_size
         cols = max(20, self.app.size.width or 80)
         rows = max(10, self.app.size.height or 24)
-        return max(1, (cols - 2) * cw), max(1, (rows - 4) * ch)
+        return max(1, (cols - 2) * cw), max(1, (rows - 5) * ch)
 
     def _fit(self):
-        """Reset zoom/pan and display the image fitted to the viewport."""
         self._scale = 1.0
         self._pan_x = 0.0
         self._pan_y = 0.0
@@ -484,36 +487,46 @@ class ImageViewerScreen(ModalScreen[None]):
             return
         cw, ch = self.app.cell_size
         vw, vh = self._viewport_px()
-        im_w, im_h = self._img.size
-        fit = min(vw / im_w, vh / im_h, 1.0)
-        disp_w = max(1, int(im_w * fit * self._scale))
-        disp_h = max(1, int(im_h * fit * self._scale))
-        # the whole scaled image is transmitted; we place a pan window into it
-        view_w = min(disp_w, vw)
-        view_h = min(disp_h, vh)
-        max_px = max(0, disp_w - view_w)
-        max_py = max(0, disp_h - view_h)
-        px = min(max_px, max(0, int(self._pan_x)))
-        py = min(max_py, max(0, int(self._pan_y)))
-        cols = max(1, view_w // max(1, cw))
-        rows = max(1, view_h // max(1, ch))
+        iw, ih = self._img.size
+        fit = min(vw / iw, vh / ih, 1.0)
+        z = max(0.4, self._scale)
+        # display size (px), capped to the viewport
+        disp_w = max(1, min(vw, int(iw * fit * z)))
+        disp_h = max(1, min(vh, int(ih * fit * z)))
+        # source window into the original image
+        src_w = max(1.0, min(iw, disp_w / (fit * z)))
+        src_h = max(1.0, min(ih, disp_h / (fit * z)))
+        sx = min(max(0.0, iw - src_w), max(0.0, self._pan_x))
+        sy = min(max(0.0, ih - src_h), max(0.0, self._pan_y))
+        cols = max(1, disp_w // max(1, cw))
+        rows = max(1, disp_h // max(1, ch))
         try:
-            from io import BytesIO
             from PIL import Image as PILImage
 
-            resized = self._img.resize((disp_w, disp_h), PILImage.LANCZOS)
-            buf = BytesIO()
-            resized.save(buf, format="PNG", optimize=True)
-            png = buf.getvalue()
-            driver = self.app._driver
-            driver.write(kitty.transmit_image(png, self._img_id, disp_w, disp_h))
-            row = max(0, (self.app.size.height - rows) // 2 - 1)
-            col = max(0, (self.app.size.width - cols) // 2)
-            driver.write(
-                f"\x1b[{row + 1};{col + 1}H" + kitty.place_image(
-                    self._img_id, px, py, view_w, view_h, cols, rows
-                )
+            crop = self._img.crop(
+                (int(sx), int(sy), int(sx + src_w), int(sy + src_h))
             )
+            resized = crop.resize((disp_w, disp_h), PILImage.LANCZOS)
+            rgba = resized.convert("RGBA").tobytes()
+            driver = self.app._driver
+            driver.write(
+                kitty.transmit_rgba(rgba, self._img_id, disp_w, disp_h)
+            )
+            # placeholder grid: fg color = image id, diacritics = row/col
+            text = Text()
+            style = kitty.image_id_style(self._img_id)
+            n = len(kitty.DIACRITICS)
+            for y in range(rows):
+                for x in range(cols):
+                    text.append(
+                        f"{kitty.PLACEHOLDER}{kitty.DIACRITICS[y % n]}{kitty.DIACRITICS[x % n]}",
+                        style=style,
+                    )
+                text.append("\n")
+            grid = self.query_one("#iviewer-grid", Static)
+            grid.update(text)
+            grid.styles.width = cols
+            grid.styles.height = rows
         except Exception:
             pass
 
@@ -538,16 +551,16 @@ class ImageViewerScreen(ModalScreen[None]):
         if not self._ready:
             return
         self._scale = min(8.0, self._scale * self.ZOOM_STEP)
-        self._pan_x = self._pan_x * self.ZOOM_STEP
-        self._pan_y = self._pan_y * self.ZOOM_STEP
+        self._pan_x *= self.ZOOM_STEP
+        self._pan_y *= self.ZOOM_STEP
         self._emit()
 
     def action_zoom_out(self):
         if not self._ready:
             return
         self._scale = max(0.4, self._scale / self.ZOOM_STEP)
-        self._pan_x = self._pan_x / self.ZOOM_STEP
-        self._pan_y = self._pan_y / self.ZOOM_STEP
+        self._pan_x /= self.ZOOM_STEP
+        self._pan_y /= self.ZOOM_STEP
         self._emit()
 
     def _pan(self, dx: float, dy: float):

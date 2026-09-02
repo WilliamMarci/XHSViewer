@@ -153,3 +153,14 @@ AnswerHeader {
     color: #8a93a3;
     padding: 0 1;
 }
+
+#iviewer-stage {
+    height: 1fr;
+    width: 100%;
+    align: center middle;
+}
+
+#iviewer-grid {
+    width: auto;
+    height: auto;
+}
