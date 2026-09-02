@@ -20,7 +20,6 @@ import os
 import shutil
 import sys
 import termios
-import time
 import tty
 from pathlib import Path
 
@@ -103,7 +102,6 @@ def main() -> int:
             return max(1, (cols - 2) * cw), max(1, (rows - 4) * ch)
 
         def emit() -> None:
-            nonlocal pan_x, pan_y
             vw, vh = viewport()
             iw, ih = im.size
             fit = min(vw / iw, vh / ih, 1.0)
@@ -121,7 +119,7 @@ def main() -> int:
             rgba = resized.convert("RGBA").tobytes()
             write(kitty.transmit_rgba(rgba, img_id, disp_w, disp_h))
             tcols, trows = shutil.get_terminal_size()
-            row = max(0, (trows - rows) // 2 - 1)
+            row = max(1, (trows - rows) // 2)
             col = max(0, (tcols - cols) // 2)
             write(f"\x1b[{row + 1};{col + 1}H" + kitty.placeholder_cells(img_id, cols, rows))
 
@@ -138,7 +136,6 @@ def main() -> int:
             end="",
             flush=True,
         )
-        write("\x1b[2;1H\x1b[K")
 
         while True:
             buf_in = os.read(0, 16)
@@ -179,7 +176,6 @@ def main() -> int:
                 end="",
                 flush=True,
             )
-            write("\x1b[2;1H\x1b[K")
     except KeyboardInterrupt:
         pass
     finally:

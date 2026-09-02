@@ -187,10 +187,11 @@ def placeholder_cells(img_id: int, cols: int, rows: int) -> str:
     out = [f"\x1b[38;2;{r};{g};{b}m"]
     n = len(DIACRITICS)
     for y in range(rows):
+        if y:
+            out.append("\r\n")  # CR+LF so every row starts at the same column
         for x in range(cols):
             out.append(f"{PLACEHOLDER}{DIACRITICS[y % n]}{DIACRITICS[x % n]}")
-        out.append("\n")
-    out.append("\x1b[39m")
+    out.append("\x1b[0m")  # ResetAttrs, like yazi
     return "".join(out)
 
 
