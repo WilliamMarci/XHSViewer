@@ -132,6 +132,40 @@ def emit_image(png: bytes, img_id: str, w_px: int, h_px: int) -> str:
     return "".join(out)
 
 
+def transmit_image(png: bytes, img_id: str, w_px: int, h_px: int) -> str:
+    """Transmit an image WITHOUT placing it (used by the image viewer,
+    which places it explicitly with a source rectangle)."""
+    b64 = base64.b64encode(png)
+    out: list[str] = []
+    n = len(b64)
+    for i in range(0, n, _CHUNK):
+        data = b64[i : i + _CHUNK].decode("ascii")
+        more = 1 if i + _CHUNK < n else 0
+        params = f"a=T,f=100,s={w_px},v={h_px},i={img_id},m={more}"
+        out.append(f"\x1b_G{params};{data}\x1b\\")
+    return "".join(out)
+
+
+def place_image(
+    img_id: str,
+    x_off_px: int,
+    y_off_px: int,
+    src_w_px: int,
+    src_h_px: int,
+    dst_cols: int,
+    dst_rows: int,
+) -> str:
+    """Place an already-transmitted image showing a source rectangle.
+
+    x_off/y_off = source offset in pixels (pan); src_w/src_h = source rect
+    size in pixels; dst_cols/dst_rows = destination size in cells.
+    """
+    return (
+        f"\x1b_Ga=p,i={img_id},X={x_off_px},Y={y_off_px},"
+        f"s={src_w_px},v={src_h_px},w={dst_cols},h={dst_rows},q=1\x1b\\"
+    )
+
+
 def delete_image(img_id: str) -> str:
     return f"\x1b_Ga=d,d=i,i={img_id}\x1b\\"
 

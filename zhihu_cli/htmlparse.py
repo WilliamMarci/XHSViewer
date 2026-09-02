@@ -20,6 +20,7 @@ from urllib.parse import unquote, urljoin
 from bs4 import BeautifulSoup, NavigableString, Tag
 from rich.text import Text
 
+from . import config
 from .mathtex import render_math
 
 BASE = "https://www.zhihu.com"
@@ -69,22 +70,42 @@ def img_src(img: Tag) -> str:
     return ""
 
 
+def _classes(img: Tag) -> str:
+    cls = img.get("class") or []
+    if not isinstance(cls, str):
+        cls = " ".join(cls)
+    return cls
+
+
 def is_equation(img: Tag) -> bool:
     """True if the img is a math formula (zhihu equation image)."""
     src = (img.get("src") or "").lower()
     if "equation" in src or "formula" in src:
         return True
-    cls = (img.get("class") or "").lower()
-    if "formula" in cls or "equation" in cls:
+    if "formula" in _classes(img).lower() or "equation" in _classes(img).lower():
         return True
     alt = img.get("alt") or ""
     return "\\" in alt
 
 
+def is_formula_svg(img: Tag) -> bool:
+    """True if the img is an SVG formula (display equations zhihu renders
+    as SVG, which terminals cannot show)."""
+    src = (img.get("src") or "").lower()
+    return ("svg" in src or "svg+xml" in src) and is_equation(img)
+
+
+def formula_img_visible(img: Tag) -> bool:
+    """Whether a formula image should also be offered as a viewable image."""
+    if not is_formula_svg(img):
+        return True
+    return bool(config.get("show_math_svg", False))
+
+
 def is_inline_equation(img: Tag) -> bool:
     """eeimg='1' marks inline formulas; block formulas have no eeimg.
 
-    Multi-line constructs (\begin{...}) are always treated as display math.
+    Multi-line constructs (\\begin{...}) are always treated as display math.
     """
     if img.get("eeimg") != "1":
         return False
@@ -182,7 +203,11 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
                 t.stylize(f"bold {H_COLOR}" if name in ("h1", "h2", "h3") else "bold")
                 blocks.append(Block("h", t))
             elif name == "p":
-                imgs = [img_src(i) for i in child.find_all("img")]
+                imgs = [
+                    img_src(i)
+                    for i in child.find_all("img")
+                    if not is_equation(i) and formula_img_visible(i)
+                ]
                 display_eqs = [
                     i
                     for i in child.find_all("img")
@@ -215,11 +240,28 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
                     items.append(t)
                 blocks.append(Block("list", items=items))
             elif name == "img":
-                add_img([img_src(child)], caption=(child.get("alt") or "").strip())
+                if is_equation(child):
+                    # display (block) formula -> math text block
+                    blocks.append(Block("math", math_text(child, inline=False)))
+                elif not formula_img_visible(child):
+                    pass  # hidden SVG formula
+                else:
+                    add_img([img_src(child)], caption=(child.get("alt") or "").strip())
             elif name == "figure":
-                imgs = [img_src(i) for i in child.find_all("img")]
+                eqs = [
+                    i
+                    for i in child.find_all("img")
+                    if is_equation(i) and not is_inline_equation(i)
+                ]
+                imgs = [
+                    img_src(i)
+                    for i in child.find_all("img")
+                    if not is_equation(i) and formula_img_visible(i)
+                ]
                 cap = child.find("figcaption")
                 caption = inline(cap).plain.strip() if cap else ""
+                for eq in eqs:
+                    blocks.append(Block("math", math_text(eq, inline=False)))
                 add_img(imgs, caption)
                 if cap and caption:
                     blocks.append(Block("figcap", Text(caption, style=f"dim {DIM}")))

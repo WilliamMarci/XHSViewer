@@ -10,3 +10,5 @@ build/
 
 # Local config / cookies
 cookies.txt
+# Crash reports
+log/

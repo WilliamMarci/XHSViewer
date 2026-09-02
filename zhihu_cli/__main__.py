@@ -3,9 +3,46 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
+import time
+import traceback
+from pathlib import Path
+
+
+def _log_crash(title: str, detail: str) -> None:
+    try:
+        log_dir = Path("log")
+        log_dir.mkdir(exist_ok=True)
+        with open(log_dir / "error.log", "a", encoding="utf-8") as f:
+            f.write(
+                f"\n{'=' * 60}\n"
+                f"{time.strftime('%Y-%m-%d %H:%M:%S')} {title}\n"
+                f"{detail}\n"
+            )
+    except Exception:
+        pass
+
+
+def _excepthook(exc_type, exc, tb) -> None:
+    _log_crash(
+        "unhandled exception",
+        "".join(traceback.format_exception(exc_type, exc, tb)),
+    )
+
+
+def _thread_excepthook(args) -> None:
+    _log_crash(
+        f"thread exception ({args.thread.name})",
+        "".join(
+            traceback.format_exception(args.exc_type, args.exc, args.exc_traceback)
+        ),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
+    sys.excepthook = _excepthook
+    threading.excepthook = _thread_excepthook
+
     ap = argparse.ArgumentParser(
         prog="zhihu",
         description="知乎 CLI 客户端：推荐流卡片浏览 + 终端内图片查看（Kitty 协议，支持 Ghostty）",

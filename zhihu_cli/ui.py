@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
-import math
+import time
+import traceback
 import webbrowser
+from pathlib import Path
 
 from rich.text import Text
 from textual import on
@@ -110,11 +112,11 @@ class AnswerHeader(Static):
         if it.created:
             t.append(f"  {fmt_time(it.created)}", style="#8a93a3")
         if it.kind == "zvideo":
-            t.append("  ▶ 视频", style="#f43f5e")
+            t.append("  [视频]", style="#f43f5e")
         t.append("\n")
         # 链接（Ctrl+点击打开）
         if it.url:
-            t.append("  🔗 ", style="dim")
+            t.append("  链接: ", style="dim")
             t.append(it.url, style="underline #5eb4f8")
             t.append("  （Ctrl+点击打开）", style=f"dim {DIM}")
         return t
@@ -153,9 +155,9 @@ class Card(Static, can_focus=True):
         if it.created:
             t.append(f"  {fmt_time(it.created)}", style="#8a93a3")
         if it.images:
-            t.append(f"  🖼 {len(it.images)}", style="#38bdf8")
+            t.append(f"  图 {len(it.images)}", style="#38bdf8")
         if it.kind == "zvideo":
-            t.append("  ▶", style="#f43f5e")
+            t.append("  [视频]", style="#f43f5e")
         return t
 
     def on_click(self, event):
@@ -378,92 +380,133 @@ class FeedScreen(Screen):
 # --------------------------------------------------------------------------
 
 
-class KittyImage(Static):
-    """Renders a PNG in the terminal via the kitty protocol, re-emitting on
-    redraw and deleting itself when scrolled out of view."""
+class ViewerHint(Static, can_focus=True):
+    pass
 
-    _seq = 0
 
-    def __init__(self, data: bytes, cell: tuple[int, int], max_cols: int, **kwargs):
-        super().__init__("", **kwargs)
-        self._cell = cell
-        KittyImage._seq += 1
-        self.img_id = f"z{KittyImage._seq:x}"
-        self.png = b""
-        self.px_w = 0
-        self.px_h = 0
-        self.rows = 1
-        self._shown = False
-        self._error = ""
-        cell_w, cell_h = cell
-        max_px = max(160, max(60, max_cols or 80) * cell_w)
-        try:
-            self.png, self.px_w, self.px_h = kitty.prepare_png(data, max_px)
-            self.rows = max(1, math.ceil(self.px_h / max(1, cell_h)))
-        except Exception as e:
-            self._error = str(e)
-        # height must be known before mount so layout reserves the space
-        self.styles.height = self.rows
+class ImageViewerScreen(ModalScreen[None]):
+    """Popup image viewer (Kitty protocol).
 
-    def render(self) -> Text:
-        if self._error:
-            return Text(f"（图片解析失败：{self._error}）", style="dim")
-        return Text("")
+    + / - zoom, hjkl / arrows pan, n / p switch image, o open in browser,
+    Esc / q close.
+    """
+
+    BINDINGS = [
+        Binding("escape,q", "close", "关闭"),
+        Binding("+", "zoom_in", "放大"),
+        Binding("=", "zoom_in", None, show=False),
+        Binding("-", "zoom_out", "缩小"),
+        Binding("h,left", "pan_left", None, show=False),
+        Binding("j,down", "pan_down", None, show=False),
+        Binding("k,up", "pan_up", None, show=False),
+        Binding("l,right", "pan_right", None, show=False),
+        Binding("n", "next_img", "下一张"),
+        Binding("p", "prev_img", "上一张"),
+        Binding("o", "open_browser", "浏览器"),
+    ]
+
+    ZOOM_STEP = 1.5
+
+    def __init__(
+        self,
+        client: ZhihuSession,
+        urls: list[str],
+        index: int = 0,
+        caption: str = "",
+    ):
+        super().__init__()
+        self.client = client
+        self.urls = urls
+        self.index = index
+        self.caption = caption
+        self._img = None  # PIL image
+        self._img_id = f"v{id(self):x}"
+        self._scale = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        self._ready = False
+        self._failed = False
+
+    def compose(self) -> ComposeResult:
+        yield ViewerHint(
+            "  + / - 缩放 · hjkl/方向键 移动 · n/p 切换 · o 浏览器 · Esc 返回",
+            id="iviewer-hint",
+        )
 
     def on_mount(self):
-        screen = self.screen
-        if hasattr(screen, "register_image"):
-            screen.register_image(self)
-        # region is not final during mount; sync after layout settles
-        self.app.call_after_refresh(self.sync_visibility)
+        self.query_one("#iviewer-hint").focus()
+        self.run_worker(self._load(), name="iviewer", group="iviewer", exclusive=True)
 
-    def on_unmount(self):
-        screen = getattr(self, "screen", None)
-        if screen is not None and hasattr(screen, "unregister_image"):
-            screen.unregister_image(self)
-        self._delete()
+    async def _load(self):
+        hint = self.query_one("#iviewer-hint")
+        try:
+            url = self.urls[self.index]
+            hint.update(f"  加载图片 {self.index + 1}/{len(self.urls)} …")
+            data = await asyncio.to_thread(self.client.fetch_image_bytes, url)
+            from io import BytesIO
+            from PIL import Image as PILImage
 
-    def _driver(self):
-        return self.app._driver
+            im = PILImage.open(BytesIO(data))
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGB")
+            self._img = im
+            self._ready = True
+            hint.update("")
+            self._fit()
+        except Exception as e:
+            self._failed = True
+            hint.update(f"  图片加载失败：{e}  （o 在浏览器打开）")
 
-    def _find_scroll(self):
-        w = self.parent
-        while w is not None:
-            if isinstance(w, VerticalScroll):
-                return w
-            w = w.parent
-        return None
+    # -- geometry ---------------------------------------------------------
 
-    def _content_top(self) -> float:
-        """Widget top edge in the scroll container's (unscrolled) content coords."""
-        scroll = self._find_scroll()
-        if scroll is None:
-            return 0.0
-        return self.region.y - scroll.region.y
+    def _viewport_px(self) -> tuple[int, int]:
+        cw, ch = self.app.cell_size
+        cols = max(20, self.app.size.width or 80)
+        rows = max(10, self.app.size.height or 24)
+        return max(1, (cols - 2) * cw), max(1, (rows - 4) * ch)
 
-    def _screen_pos(self):
-        scroll = self._find_scroll()
-        if scroll is None:
-            return None
-        return self.region.y - scroll.scroll_y, self.region.x - scroll.scroll_x
+    def _fit(self):
+        """Reset zoom/pan and display the image fitted to the viewport."""
+        self._scale = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        self._emit()
 
     def _emit(self):
-        if not self.png or not kitty.enabled:
+        if not self._ready or not self._img or not kitty.enabled:
             return
-        pos = self._screen_pos()
-        if pos is None:
-            return
-        row, col = pos
-        scroll = self._find_scroll()
-        if scroll is None:
-            return
-        if row < 0 or row >= scroll.region.height:
-            return
+        cw, ch = self.app.cell_size
+        vw, vh = self._viewport_px()
+        im_w, im_h = self._img.size
+        fit = min(vw / im_w, vh / im_h, 1.0)
+        disp_w = max(1, int(im_w * fit * self._scale))
+        disp_h = max(1, int(im_h * fit * self._scale))
+        # the whole scaled image is transmitted; we place a pan window into it
+        view_w = min(disp_w, vw)
+        view_h = min(disp_h, vh)
+        max_px = max(0, disp_w - view_w)
+        max_py = max(0, disp_h - view_h)
+        px = min(max_px, max(0, int(self._pan_x)))
+        py = min(max_py, max(0, int(self._pan_y)))
+        cols = max(1, view_w // max(1, cw))
+        rows = max(1, view_h // max(1, ch))
         try:
-            data = f"\x1b[{row + 1};{col + 1}H" + kitty.emit_image(
-                self.png, self.img_id, self.px_w, self.px_h
+            from io import BytesIO
+            from PIL import Image as PILImage
+
+            resized = self._img.resize((disp_w, disp_h), PILImage.LANCZOS)
+            buf = BytesIO()
+            resized.save(buf, format="PNG", optimize=True)
+            png = buf.getvalue()
+            driver = self.app._driver
+            driver.write(kitty.transmit_image(png, self._img_id, disp_w, disp_h))
+            row = max(0, (self.app.size.height - rows) // 2 - 1)
+            col = max(0, (self.app.size.width - cols) // 2)
+            driver.write(
+                f"\x1b[{row + 1};{col + 1}H" + kitty.place_image(
+                    self._img_id, px, py, view_w, view_h, cols, rows
+                )
             )
-            self._driver().write(data)
         except Exception:
             pass
 
@@ -471,31 +514,78 @@ class KittyImage(Static):
         if not kitty.enabled:
             return
         try:
-            self._driver().write(kitty.delete_image(self.img_id))
+            self.app._driver.write(kitty.delete_image(self._img_id))
         except Exception:
             pass
 
-    def sync_visibility(self):
-        if not self.png:
+    def on_unmount(self):
+        self._delete()
+
+    # -- actions ----------------------------------------------------------
+
+    def action_close(self):
+        self._delete()
+        self.dismiss(None)
+
+    def action_zoom_in(self):
+        if not self._ready:
             return
-        scroll = self._find_scroll()
-        if scroll is None or self.region.height <= 0:
+        self._scale = min(8.0, self._scale * self.ZOOM_STEP)
+        self._pan_x = self._pan_x * self.ZOOM_STEP
+        self._pan_y = self._pan_y * self.ZOOM_STEP
+        self._emit()
+
+    def action_zoom_out(self):
+        if not self._ready:
             return
-        view_top = scroll.scroll_y
-        view_h = scroll.region.height
-        my_top = self._content_top()
-        my_bottom = my_top + self.rows
-        visible = my_bottom >= view_top and my_top <= view_top + view_h
-        if visible and not self._shown:
-            self._shown = True
-            self._emit()
-        elif not visible and self._shown:
-            self._shown = False
-            self._delete()
+        self._scale = max(0.4, self._scale / self.ZOOM_STEP)
+        self._pan_x = self._pan_x / self.ZOOM_STEP
+        self._pan_y = self._pan_y / self.ZOOM_STEP
+        self._emit()
+
+    def _pan(self, dx: float, dy: float):
+        if not self._ready:
+            return
+        cw, ch = self.app.cell_size
+        self._pan_x += dx * cw
+        self._pan_y += dy * ch
+        self._emit()
+
+    def action_pan_left(self):
+        self._pan(-2, 0)
+
+    def action_pan_right(self):
+        self._pan(2, 0)
+
+    def action_pan_up(self):
+        self._pan(0, -2)
+
+    def action_pan_down(self):
+        self._pan(0, 2)
+
+    def action_next_img(self):
+        if len(self.urls) > 1:
+            self.index = (self.index + 1) % len(self.urls)
+            self._ready = False
+            self.run_worker(
+                self._load(), name="iviewer", group="iviewer", exclusive=True
+            )
+
+    def action_prev_img(self):
+        if len(self.urls) > 1:
+            self.index = (self.index - 1) % len(self.urls)
+            self._ready = False
+            self.run_worker(
+                self._load(), name="iviewer", group="iviewer", exclusive=True
+            )
+
+    def action_open_browser(self):
+        if self.urls:
+            webbrowser.open(self.urls[self.index])
 
 
 class ImageSection(Vertical):
-    """One image (or group) with its own independent expand button."""
+    """One image (or group) with its own button opening the popup viewer."""
 
     def __init__(self, client: ZhihuSession, urls: list[str], no: int, caption: str = ""):
         super().__init__(classes="imgsec")
@@ -503,12 +593,9 @@ class ImageSection(Vertical):
         self.urls = urls
         self.no = no
         self.caption = caption
-        self.expanded = False
-        self._images: list[KittyImage] = []
-        self._btn: Button | None = None
 
     def compose(self) -> ComposeResult:
-        label = f"🖼 图片 {self.no}"
+        label = f"图片 {self.no}"
         if self.caption:
             label += f" · {self.caption[:24]}"
         self._btn = Button(label, classes="imgbtn")
@@ -519,64 +606,14 @@ class ImageSection(Vertical):
         if event.button is not self._btn:
             return
         if not kitty.enabled:
-            self.app.notify("当前终端不支持内联图片（需 Kitty 协议，如 Ghostty）", severity="warning")
+            self.app.notify(
+                "当前终端不支持图片显示（需 Kitty 协议，如 Ghostty）",
+                severity="warning",
+            )
             return
-        self.toggle()
-
-    def toggle(self):
-        if self.expanded:
-            self._collapse()
-        else:
-            self.run_worker(self._expand(), name=f"img-{id(self)}", group="imgload")
-
-    def _label(self, extra: str = "") -> str:
-        base = f"🖼 图片 {self.no}"
-        if self.caption:
-            base += f" · {self.caption[:24]}"
-        return base + extra
-
-    async def _expand(self):
-        if self.expanded:
-            return
-        self._btn.disabled = True
-        self._btn.label = "下载中…"
-        screen = self.screen
-        if hasattr(screen, "_busy"):
-            screen._busy("下载图片…")
-        datas: list[bytes] = []
-        try:
-            for u in self.urls:
-                datas.append(await asyncio.to_thread(self.client.fetch_image_bytes, u))
-        except Exception as e:
-            self._btn.disabled = False
-            self._btn.label = self._label("（下载失败）")
-            self.app.notify(f"图片下载失败：{e}", severity="error", timeout=6)
-            if hasattr(screen, "_idle"):
-                screen._idle()
-            return
-        self.expanded = True
-        cell = self.app.cell_size
-        max_cols = (self.app.size.width or 80) - 2
-        for data in datas:
-            img = KittyImage(data, cell, max_cols)
-            self._images.append(img)
-            self.mount(img)
-        self._btn.disabled = False
-        self._btn.label = self._label("（收起）")
-        if hasattr(screen, "_idle"):
-            screen._idle()
-
-    def _collapse(self):
-        for img in self._images:
-            img.remove()
-        self._images.clear()
-        self.expanded = False
-        self._btn.label = self._label()
-
-
-# --------------------------------------------------------------------------
-# Content (expanded) screen
-# --------------------------------------------------------------------------
+        self.app.push_screen(
+            ImageViewerScreen(self.client, self.urls, 0, self.caption)
+        )
 
 
 class ContentScroll(VerticalScroll):
@@ -609,15 +646,10 @@ class ContentScroll(VerticalScroll):
 
     def watch_scroll_x(self, old, new):
         super().watch_scroll_x(old, new)
-        s = self.screen
-        if hasattr(s, "sync_images"):
-            s.sync_images()
 
     def watch_scroll_y(self, old, new):
         super().watch_scroll_y(old, new)
         s = self.screen
-        if hasattr(s, "sync_images"):
-            s.sync_images()
         if hasattr(s, "check_bottom"):
             s.check_bottom()
 
@@ -639,7 +671,6 @@ class ContentScreen(Screen):
         super().__init__()
         self.client = client
         self.item = item
-        self._images: set[KittyImage] = set()
         self.img_sections: list[ImageSection] = []
         self._rendering = False
         self._bottom_notified = False
@@ -669,24 +700,6 @@ class ContentScreen(Screen):
         status = self.query_one("#status", StatusLine)
         status.idle()
 
-    # -- image bookkeeping ------------------------------------------------
-
-    def register_image(self, w: KittyImage):
-        self._images.add(w)
-
-    def unregister_image(self, w: KittyImage):
-        self._images.discard(w)
-
-    def sync_images(self):
-        for w in list(self._images):
-            w.sync_visibility()
-
-    def on_resize(self, event):
-        for w in list(self._images):
-            w._shown = False
-            w._delete()
-        self.app.call_after_refresh(self.sync_images)
-
     # -- content ----------------------------------------------------------
 
     async def _build(self):
@@ -698,69 +711,73 @@ class ContentScreen(Screen):
         self._rendering = True
         self._busy("加载中…")
         try:
-            self.item = item
-            self._bottom_notified = False
-            header = self.query_one("#answer-header", AnswerHeader)
-            header.set_item(item)
-            content = self.query_one("#content")
-            for w in list(self._images):
-                w._delete()
-            self._images.clear()
-            self.img_sections.clear()
-            content.remove_children()
-
-            it = item
-            content.mount(Rule(classes="rule"))
-
-            def add_img_section(urls, caption=""):
-                sec = ImageSection(
-                    self.client, urls, len(self.img_sections) + 1, caption
-                )
-                self.img_sections.append(sec)
-                content.mount(sec)
-
-            if it.kind == "zvideo":
-                note = "▶ 视频内容请在浏览器中播放"
-                content.mount(Static(Text(note, style="italic #f43f5e")))
-                if it.thumb:
-                    add_img_section([it.thumb], "视频封面")
-                play = Button(" ▶ 在浏览器播放视频 ", id="open-video", classes="playbtn")
-                content.mount(Horizontal(play, classes="row"))
-            else:
-                blocks: list[Block] = []
-                if it.content:
-                    blocks, _ = await asyncio.to_thread(parse_html, it.content)
-                if it.kind == "pin":
-                    for u in it.images:
-                        add_img_section([u])
-                for b in blocks:
-                    if b.kind == "img":
-                        add_img_section(b.urls, b.caption)
-                    elif b.kind == "math":
-                        content.mount(Static(b.text, classes="math"))
-                    elif b.kind == "list":
-                        text = Text()
-                        for item_text in b.items:
-                            text.append_text(item_text)
-                            text.append("\n")
-                        content.mount(Static(text))
-                    elif b.kind == "table":
-                        content.mount(Static(table_to_text(b)))
-                    elif b.kind == "hr":
-                        content.mount(Static(b.text))
-                    else:
-                        if b.text:
-                            content.mount(Static(b.text))
-                if not blocks and not it.images:
-                    content.mount(Static("（无正文内容）", style="dim"))
-
-            row = Horizontal(Button(" 在浏览器打开 ", id="open-web"), classes="row")
-            content.mount(row)
-            content.scroll_home(animate=False, immediate=True)
+            try:
+                await self._render_body(item)
+            except Exception as e:
+                self.notify(f"内容解析失败：{e}", severity="error", timeout=8)
+                content = self.query_one("#content")
+                content.mount(Static(f"（内容解析失败：{e}）", style="dim"))
+                content.scroll_home(animate=False, immediate=True)
         finally:
             self._rendering = False
             self._idle()
 
+    async def _render_body(self, item: FeedItem):
+        self.item = item
+        self._bottom_notified = False
+        header = self.query_one("#answer-header", AnswerHeader)
+        header.set_item(item)
+        content = self.query_one("#content")
+        self.img_sections.clear()
+        content.remove_children()
+        it = item
+        content.mount(Rule(classes="rule"))
+
+        def add_img_section(urls, caption=""):
+            sec = ImageSection(
+                self.client, urls, len(self.img_sections) + 1, caption
+            )
+            self.img_sections.append(sec)
+            content.mount(sec)
+
+        if it.kind == "zvideo":
+            note = "[视频] 内容请在浏览器中播放"
+            content.mount(Static(Text(note, style="italic #f43f5e")))
+            if it.thumb:
+                add_img_section([it.thumb], "视频封面")
+            play = Button(" [播放视频] ", id="open-video", classes="playbtn")
+            content.mount(Horizontal(play, classes="row"))
+        else:
+            blocks: list[Block] = []
+            if it.content:
+                blocks, _ = await asyncio.to_thread(parse_html, it.content)
+            if it.kind == "pin":
+                for u in it.images:
+                    add_img_section([u])
+            for b in blocks:
+                if b.kind == "img":
+                    add_img_section(b.urls, b.caption)
+                elif b.kind == "math":
+                    content.mount(Static(b.text, classes="math"))
+                elif b.kind == "list":
+                    text = Text()
+                    for item_text in b.items:
+                        text.append_text(item_text)
+                        text.append("\n")
+                    content.mount(Static(text))
+                elif b.kind == "table":
+                    content.mount(Static(table_to_text(b)))
+                elif b.kind == "hr":
+                    content.mount(Static(b.text))
+                else:
+                    if b.text:
+                        content.mount(Static(b.text))
+            if not blocks and not it.images:
+                content.mount(Static("（无正文内容）", style="dim"))
+
+        row = Horizontal(Button(" 在浏览器打开 ", id="open-web"), classes="row")
+        content.mount(row)
+        content.scroll_home(animate=False, immediate=True)
     @on(Button.Pressed, "#open-web")
     def _open_web(self, event: Button.Pressed):
         if self.item.url:
@@ -863,8 +880,6 @@ class ContentScreen(Screen):
     # -- actions ----------------------------------------------------------
 
     def action_back(self):
-        for w in list(self._images):
-            w._delete()
         self.app.pop_screen()
 
     def action_scroll_down(self):
@@ -908,15 +923,19 @@ class ContentScreen(Screen):
             webbrowser.open(self.item.url)
 
     def action_toggle_all_images(self):
-        if not self.img_sections:
+        """i: open the popup viewer for all images of the answer."""
+        urls: list[str] = []
+        for sec in self.img_sections:
+            for u in sec.urls:
+                if u not in urls:
+                    urls.append(u)
+        if not urls:
+            self.notify("本回答没有图片", timeout=3)
             return
-        if all(s.expanded for s in self.img_sections):
-            for s in self.img_sections:
-                s.toggle()
-        else:
-            for s in self.img_sections:
-                if not s.expanded:
-                    s.toggle()
+        if not kitty.enabled:
+            self.notify("当前终端不支持图片显示（需 Kitty 协议，如 Ghostty）", severity="warning")
+            return
+        self.app.push_screen(ImageViewerScreen(self.client, urls, 0))
 
 
 # --------------------------------------------------------------------------
@@ -952,7 +971,7 @@ class CommentsScreen(ModalScreen[None]):
         count = fmt_num(self.item.comments) if self.item.comments else ""
         yield Vertical(
             Static(
-                f" 💬 评论 · {self.item.author or '匿名用户'}{('（' + count + '）') if count else ''}",
+                f" 评论 · {self.item.author or '匿名用户'}{('（' + count + '）') if count else ''}",
                 classes="cmt-title",
             ),
             CommentScroll(Static(" 加载中…", classes="hint"), id="comments"),
@@ -1055,6 +1074,40 @@ class ZhihuApp(App):
         # snappier wheel scrolling
         self.scroll_sensitivity_x = 4.0
         self.scroll_sensitivity_y = 4.0
+
+    # -- crash logging ----------------------------------------------------
+
+    def _log_error(self, title: str, detail: str):
+        try:
+            log_dir = Path("log")
+            log_dir.mkdir(exist_ok=True)
+            with open(log_dir / "error.log", "a", encoding="utf-8") as f:
+                f.write(
+                    f"\n{'=' * 60}\n"
+                    f"{time.strftime('%Y-%m-%d %H:%M:%S')} {title}\n"
+                    f"{detail}\n"
+                )
+        except Exception:
+            pass
+
+    def panic(self, *renderables):
+        try:
+            import io
+
+            from rich.console import Console
+
+            buf = io.StringIO()
+            Console(file=buf, force_terminal=False, width=100).print(*renderables)
+            self._log_error("panic", buf.getvalue())
+        except Exception:
+            pass
+        super().panic(*renderables)
+
+    def _handle_exception(self, error: Exception) -> None:
+        self._log_error(
+            "unhandled exception", traceback.format_exc(limit=30)
+        )
+        super()._handle_exception(error)
 
     def on_mount(self):
         self.push_screen(FeedScreen(self.client, self.user))

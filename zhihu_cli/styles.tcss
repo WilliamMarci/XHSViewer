@@ -144,3 +144,12 @@ AnswerHeader {
     padding: 1 0 1 0;
     border-bottom: solid #1e2430;
 }
+
+#iviewer-hint {
+    width: 100%;
+    dock: top;
+    height: 1;
+    background: #171a21;
+    color: #8a93a3;
+    padding: 0 1;
+}
