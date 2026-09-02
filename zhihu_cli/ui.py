@@ -26,6 +26,13 @@ from .net import (
     fmt_time,
 )
 
+# Nerd Font icon glyphs (需终端安装 Nerd Font，如 JetBrainsMono Nerd Font)
+ICON_IMAGE = "\uf0437"    # nf-md-image
+ICON_IMAGES = "\uf044e"   # nf-md-image-multiple
+ICON_LINK = "\uf0371"     # nf-md-link
+ICON_PLAY = "\uf040a"     # nf-md-play
+ICON_COMMENT = "\uf0277"  # nf-md-comment
+
 BADGE_COLOR = {
     "回答": "#3b82f6",
     "文章": "#10b981",
@@ -112,11 +119,11 @@ class AnswerHeader(Static):
         if it.created:
             t.append(f"  {fmt_time(it.created)}", style="#8a93a3")
         if it.kind == "zvideo":
-            t.append("  [视频]", style="#f43f5e")
+            t.append(f"  {ICON_PLAY} 视频", style="#f43f5e")
         t.append("\n")
         # 链接（Ctrl+点击打开）
         if it.url:
-            t.append("  链接: ", style="dim")
+            t.append(f"  {ICON_LINK} ", style="dim")
             t.append(it.url, style="underline #5eb4f8")
             t.append("  （Ctrl+点击打开）", style=f"dim {DIM}")
         return t
@@ -155,9 +162,9 @@ class Card(Static, can_focus=True):
         if it.created:
             t.append(f"  {fmt_time(it.created)}", style="#8a93a3")
         if it.images:
-            t.append(f"  图 {len(it.images)}", style="#38bdf8")
+            t.append(f"  {ICON_IMAGE} {len(it.images)}", style="#38bdf8")
         if it.kind == "zvideo":
-            t.append("  [视频]", style="#f43f5e")
+            t.append(f"  {ICON_PLAY} 视频", style="#f43f5e")
         return t
 
     def on_click(self, event):
@@ -595,7 +602,7 @@ class ImageSection(Vertical):
         self.caption = caption
 
     def compose(self) -> ComposeResult:
-        label = f"图片 {self.no}"
+        label = f"{ICON_IMAGE} 图片 {self.no}"
         if self.caption:
             label += f" · {self.caption[:24]}"
         self._btn = Button(label, classes="imgbtn")
@@ -741,11 +748,11 @@ class ContentScreen(Screen):
             content.mount(sec)
 
         if it.kind == "zvideo":
-            note = "[视频] 内容请在浏览器中播放"
+            note = f"{ICON_PLAY} 视频内容请在浏览器中播放"
             content.mount(Static(Text(note, style="italic #f43f5e")))
             if it.thumb:
                 add_img_section([it.thumb], "视频封面")
-            play = Button(" [播放视频] ", id="open-video", classes="playbtn")
+            play = Button(f" {ICON_PLAY} 播放视频 ", id="open-video", classes="playbtn")
             content.mount(Horizontal(play, classes="row"))
         else:
             blocks: list[Block] = []
@@ -971,7 +978,7 @@ class CommentsScreen(ModalScreen[None]):
         count = fmt_num(self.item.comments) if self.item.comments else ""
         yield Vertical(
             Static(
-                f" 评论 · {self.item.author or '匿名用户'}{('（' + count + '）') if count else ''}",
+                f" {ICON_COMMENT} 评论 · {self.item.author or '匿名用户'}{('（' + count + '）') if count else ''}",
                 classes="cmt-title",
             ),
             CommentScroll(Static(" 加载中…", classes="hint"), id="comments"),
