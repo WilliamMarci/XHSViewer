@@ -386,15 +386,19 @@ class ContentScreen(Screen):
             self._ans_switching = False
 
     def check_bottom(self):
-        """Small toast when an answer's content reaches its end."""
-        if self._bottom_notified or self.item.kind != "answer":
-            return
-        content = self.query_one("#content")
-        if content.max_scroll_y is None:
-            return
-        if content.scroll_y >= content.max_scroll_y - 1:
-            self._bottom_notified = True
-            self.notify("已到回答底部 · n 下一个回答 · N 上一个 · c 评论", timeout=4)
+        """Small toast when an answer's content reaches its end.
+
+        Disabled: bottom notification is no longer wanted.
+        """
+        # if self._bottom_notified or self.item.kind != "answer":
+        #     return
+        # content = self.query_one("#content")
+        # if content.max_scroll_y is None:
+        #     return
+        # if content.scroll_y >= content.max_scroll_y - 1:
+        #     self._bottom_notified = True
+        #     self.notify("已到回答底部 · n 下一个回答 · N 上一个 · c 评论", timeout=4)
+        pass
 
     # -- actions ----------------------------------------------------------
 
