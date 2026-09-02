@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "zhihu-cli"
+name = "zhihuviewer"
 version = "0.2.0"
 description = "知乎 CLI 客户端：推荐流卡片浏览、终端内图片查看（Kitty 协议，支持 Ghostty）"
 readme = "README.md"
@@ -18,10 +18,10 @@ dependencies = [
 ]
 
 [project.scripts]
-zhihu = "zhihu_cli.__main__:main"
+zhihuviewer = "zhihu_cli.__main__:main"
 
 [tool.setuptools]
-packages = ["zhihu_cli"]
+packages = ["zhihu_cli", "zhihu_cli.ui"]
 
 [tool.setuptools.package-data]
 zhihu_cli = ["*.tcss"]

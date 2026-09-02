@@ -72,6 +72,15 @@ TopBar {
     color: $text;
 }
 
+/* trailing-end question-detail toggle (▼ 展开 / ▲ 收起) */
+.answer-topbar-toggle {
+    height: 1;
+    min-width: 0;
+    border: none;
+    padding: 0 2;
+    color: $accent;
+}
+
 /* one-row bottom bar: mode badge + spinner + key hints */
 BottomBar {
     dock: bottom;
@@ -166,6 +175,13 @@ HistoryEntry {
     height: auto;
     margin: 0;
     padding: 0;
+    background: $surface;
+}
+
+.question-detail {
+    margin: 0 1 1 1;
+    padding: 1 2;
+    border: round $border;
     background: $surface;
 }
 
@@ -431,7 +447,8 @@ ClickableText:focus {
     margin: 1;
 }
 
-#open-web {
+#open-web,
+#end-next-answer {
     height: 1;
     border: none;
     min-width: 0;
@@ -446,6 +463,28 @@ ClickableText:focus {
     background: $panel;
     border: round $accent;
     padding: 1 1;
+}
+
+#cmt-title-row {
+    height: 1;
+    background: $panel;
+}
+
+.cmt-head {
+    height: 1;
+    padding: 0 1;
+    text-style: bold;
+}
+
+.cmt-spacer {
+    width: 1fr;
+}
+
+.cmt-close {
+    height: 1;
+    border: none;
+    min-width: 0;
+    color: $accent;
 }
 
 .cmt-title {

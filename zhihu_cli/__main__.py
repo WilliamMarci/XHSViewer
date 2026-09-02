@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     threading.excepthook = _thread_excepthook
 
     ap = argparse.ArgumentParser(
-        prog="zhihu",
+        prog="zhihuviewer",
         description="知乎 CLI 客户端：推荐流卡片浏览 + 终端内图片查看（Kitty 协议，支持 Ghostty）",
     )
     ap.add_argument("--login", action="store_true", help="强制重新登录")

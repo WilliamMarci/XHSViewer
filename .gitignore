@@ -10,5 +10,12 @@ build/
 
 # Local config / cookies
 cookies.txt
+
 # Crash reports
 log/
+
+# Local backups / editor / tooling
+*.bak
+.DS_Store
+.agents/
+.codex/
