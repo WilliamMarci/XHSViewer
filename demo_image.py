@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import shutil
 import sys
 import termios
@@ -64,7 +65,7 @@ def load_image(arg: str | None) -> tuple[bytes, str]:
 
 
 def main() -> int:
-    arg = sys.argv[1] if len(sys.argv) > 1 else None
+    arg = next((a for a in sys.argv[1:] if a != "--diag"), None)
 
     if not kitty.terminal_supports_kitty() and not os.environ.get("ZHIHU_KITTY"):
         print("提示：未检测到 Kitty 兼容终端（如 Ghostty）。", file=sys.stderr)
@@ -86,6 +87,7 @@ def main() -> int:
     print(f"图片: {im.size[0]}x{im.size[1]}px  ({desc})", file=sys.stderr)
 
     img_id = (os.getpid() & 0xFFFF) ^ 0x5A5A
+    diag = "--diag" in sys.argv
     scale = 1.0
     pan_x = 0.0
     pan_y = 0.0
@@ -100,6 +102,22 @@ def main() -> int:
         def viewport() -> tuple[int, int]:
             cols, rows = shutil.get_terminal_size()
             return max(1, (cols - 2) * cw), max(1, (rows - 4) * ch)
+
+        status: list[str] = []
+
+        def read_response() -> str:
+            import select
+
+            r, _, _ = select.select([0], [], [], 0.8)
+            if not r:
+                return ""
+            try:
+                data = os.read(0, 65536).decode("utf-8", "ignore")
+            except OSError:
+                return ""
+            for m in re.finditer(r"\x1b_G([^\x1b]*)\x1b\\", data):
+                return m.group(1)
+            return data.strip()[:80]
 
         def emit() -> None:
             vw, vh = viewport()
@@ -117,7 +135,15 @@ def main() -> int:
             crop = im.crop((int(sx), int(sy), int(sx + src_w), int(sy + src_h)))
             resized = crop.resize((disp_w, disp_h), PILImage.LANCZOS)
             rgba = resized.convert("RGBA").tobytes()
-            write(kitty.transmit_rgba(rgba, img_id, disp_w, disp_h))
+            if diag:
+                # q=1 so Ghostty responds on success AND failure
+                seq = kitty.transmit_rgba(rgba, img_id, disp_w, disp_h)
+                seq = seq.replace("q=2,a=T", "q=1,a=T", 1)
+                write(seq)
+                resp = read_response()
+                status.append(f"传输响应: {resp}" if resp else "传输响应: (无)")
+            else:
+                write(kitty.transmit_rgba(rgba, img_id, disp_w, disp_h))
             tcols, trows = shutil.get_terminal_size()
             row = max(1, (trows - rows) // 2)
             col = max(0, (tcols - cols) // 2)
@@ -131,11 +157,10 @@ def main() -> int:
 
         write("\x1b[2J\x1b[H")
         emit()
-        print(
-            f"\x1b[1;1H\x1b[K 图片演示: 缩放 1.00x  ({desc})  + / - 缩放  hjkl 平移  q 退出",
-            end="",
-            flush=True,
-        )
+        hint = f" 图片演示: 缩放 1.00x  ({desc})  + / - 缩放  hjkl 平移  q 退出"
+        if status:
+            hint += "  " + status[0]
+        print("\x1b[1;1H\x1b[K" + hint, end="", flush=True)
 
         while True:
             buf_in = os.read(0, 16)
@@ -171,11 +196,10 @@ def main() -> int:
                 webbrowser.open(arg)
                 print(f"已在浏览器打开: {arg}")
                 return 0
-            print(
-                f"\x1b[1;1H\x1b[K 图片演示: 缩放 {scale:.2f}x  ({desc})  q 退出",
-                end="",
-                flush=True,
-            )
+            hint = f" 图片演示: 缩放 {scale:.2f}x  ({desc})  q 退出"
+            if status:
+                hint += "  " + status[0]
+            print("\x1b[1;1H\x1b[K" + hint, end="", flush=True)
     except KeyboardInterrupt:
         pass
     finally:
