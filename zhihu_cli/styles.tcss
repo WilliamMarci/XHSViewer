@@ -55,6 +55,22 @@ Card:focus {
     height: 1fr;
 }
 
+AnswerHeader {
+    height: auto;
+    max-height: 8;
+    padding: 1 2 1 2;
+    border-bottom: solid #232a36;
+    background: #10141c;
+}
+
+.playbtn {
+    height: 1;
+    border: none;
+    min-width: 0;
+    text-align: left;
+    content-align: left middle;
+}
+
 .title {
     margin: 0 1;
 }
@@ -67,6 +83,11 @@ Card:focus {
 .rule {
     color: #2a3140;
     margin: 0 0 1 0;
+}
+
+.math {
+    text-align: center;
+    margin: 1 2;
 }
 
 .imgsec {

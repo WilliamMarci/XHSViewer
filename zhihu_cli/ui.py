@@ -10,11 +10,12 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.events import Click
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, Footer, Rule, Static
 
 from . import kitty
-from .htmlparse import Block, parse_html, table_to_text
+from .htmlparse import DIM, Block, parse_html, table_to_text
 from .net import (
     FeedItem,
     NotLoggedIn,
@@ -81,6 +82,48 @@ class StatusLine(Static):
         self.update(f"{self.SPINNER[self._spin % len(self.SPINNER)]} {self._text}")
 
 
+class AnswerHeader(Static):
+    """Fixed header: 问题 / 作者 / 赞 / 链接.  Ctrl+click opens the link."""
+
+    def __init__(self, **kwargs):
+        super().__init__("", **kwargs)
+        self.item: FeedItem | None = None
+
+    def set_item(self, item: FeedItem):
+        self.item = item
+        self.refresh()
+
+    def render(self) -> Text:
+        it = self.item
+        if it is None:
+            return Text("")
+        t = Text()
+        # 问题
+        t.append("  " + (it.title or ""), style="bold white")
+        t.append("\n")
+        # 作者 · 赞 · 评论 · 时间
+        t.append(f"  {it.author or '匿名用户'}", style="bold #eab308")
+        if it.votes:
+            t.append(f"  赞 {fmt_num(it.votes)}", style="#34d399")
+        if it.comments:
+            t.append(f"  评 {fmt_num(it.comments)}", style="#8a93a3")
+        if it.created:
+            t.append(f"  {fmt_time(it.created)}", style="#8a93a3")
+        if it.kind == "zvideo":
+            t.append("  ▶ 视频", style="#f43f5e")
+        t.append("\n")
+        # 链接（Ctrl+点击打开）
+        if it.url:
+            t.append("  🔗 ", style="dim")
+            t.append(it.url, style="underline #5eb4f8")
+            t.append("  （Ctrl+点击打开）", style=f"dim {DIM}")
+        return t
+
+    def on_click(self, event: Click):
+        if event.ctrl and self.item is not None and self.item.url:
+            webbrowser.open(self.item.url)
+
+
 # --------------------------------------------------------------------------
 # Feed
 # --------------------------------------------------------------------------
@@ -125,10 +168,10 @@ class FeedScroll(VerticalScroll, inherit_bindings=False):
     # those keys move the card selection (screen bindings).  Page/Home/End
     # still scroll the viewport (instantly).  Mouse wheel is unaffected.
     BINDINGS = [
-        Binding("pageup", "instant_page_up", show=False),
-        Binding("pagedown", "instant_page_down", show=False),
-        Binding("home", "instant_home", show=False),
-        Binding("end", "instant_end", show=False),
+        Binding("pageup", "instant_page_up", "", show=False),
+        Binding("pagedown", "instant_page_down", "", show=False),
+        Binding("home", "instant_home", "", show=False),
+        Binding("end", "instant_end", "", show=False),
     ]
 
     def action_instant_page_up(self):
@@ -582,8 +625,8 @@ class ContentScroll(VerticalScroll):
 class ContentScreen(Screen):
     BINDINGS = [
         Binding("escape,q", "back", "返回"),
-        Binding("j,down", "scroll_down", None, show=False),
-        Binding("k,up", "scroll_up", None, show=False),
+        Binding("j,down", "scroll_down", "", show=False),
+        Binding("k,up", "scroll_up", "", show=False),
         Binding("space", "page_down", "下翻页"),
         Binding("n", "next_answer", "下一个回答"),
         Binding("N", "prev_answer", "上一个回答"),
@@ -610,6 +653,7 @@ class ContentScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield TopBar(f"展开 · {self.item.badge}")
+        yield AnswerHeader(id="answer-header")
         yield ContentScroll(id="content")
         yield StatusLine(id="status")
         yield Footer()
@@ -656,6 +700,8 @@ class ContentScreen(Screen):
         try:
             self.item = item
             self._bottom_notified = False
+            header = self.query_one("#answer-header", AnswerHeader)
+            header.set_item(item)
             content = self.query_one("#content")
             for w in list(self._images):
                 w._delete()
@@ -664,18 +710,7 @@ class ContentScreen(Screen):
             content.remove_children()
 
             it = item
-            content.mount(Static(Text(it.title, style="bold"), classes="title"))
-            meta = Text()
-            meta.append(f"  {it.author or '匿名用户'}", style="bold #eab308")
-            if it.votes:
-                meta.append(f"  赞 {fmt_num(it.votes)}", style="#34d399")
-            if it.comments:
-                meta.append(f"  评 {fmt_num(it.comments)}", style="#8a93a3")
-            if it.created:
-                meta.append(f"  {fmt_time(it.created)}", style="#8a93a3")
-            if it.url:
-                meta.append(f"\n  {it.url}", style="dim")
-            content.mount(Static(meta, classes="meta"), Rule(classes="rule"))
+            content.mount(Rule(classes="rule"))
 
             def add_img_section(urls, caption=""):
                 sec = ImageSection(
@@ -685,12 +720,12 @@ class ContentScreen(Screen):
                 content.mount(sec)
 
             if it.kind == "zvideo":
-                note = "▶ 视频内容请在浏览器中打开"
-                if it.video_url:
-                    note += "（已找到播放直链）"
+                note = "▶ 视频内容请在浏览器中播放"
                 content.mount(Static(Text(note, style="italic #f43f5e")))
                 if it.thumb:
                     add_img_section([it.thumb], "视频封面")
+                play = Button(" ▶ 在浏览器播放视频 ", id="open-video", classes="playbtn")
+                content.mount(Horizontal(play, classes="row"))
             else:
                 blocks: list[Block] = []
                 if it.content:
@@ -701,6 +736,8 @@ class ContentScreen(Screen):
                 for b in blocks:
                     if b.kind == "img":
                         add_img_section(b.urls, b.caption)
+                    elif b.kind == "math":
+                        content.mount(Static(b.text, classes="math"))
                     elif b.kind == "list":
                         text = Text()
                         for item_text in b.items:
@@ -728,6 +765,12 @@ class ContentScreen(Screen):
     def _open_web(self, event: Button.Pressed):
         if self.item.url:
             webbrowser.open(self.item.url)
+
+    @on(Button.Pressed, "#open-video")
+    def _open_video(self, event: Button.Pressed):
+        url = self.item.video_url or self.item.url
+        if url:
+            webbrowser.open(url)
 
     # -- answer switching -------------------------------------------------
 
@@ -892,9 +935,9 @@ class CommentScroll(VerticalScroll):
 class CommentsScreen(ModalScreen[None]):
     BINDINGS = [
         Binding("escape,q", "close", "关闭"),
-        Binding("j,down", "scroll_down", None, show=False),
-        Binding("k,up", "scroll_up", None, show=False),
-        Binding("space", "page_down", None, show=False),
+        Binding("j,down", "scroll_down", "", show=False),
+        Binding("k,up", "scroll_up", "", show=False),
+        Binding("space", "page_down", "", show=False),
     ]
 
     def __init__(self, client: ZhihuSession, item: FeedItem):

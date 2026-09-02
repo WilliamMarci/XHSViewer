@@ -13,11 +13,14 @@ Element -> style mapping (color / bold / background):
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 from rich.text import Text
+
+from .mathtex import render_math
 
 BASE = "https://www.zhihu.com"
 
@@ -28,6 +31,7 @@ CODE_COLOR = "#e6b450"       # code text
 CODE_BG = "#20222a"          # code background
 LINK_COLOR = "#5eb4f8"       # links
 BULLET_COLOR = "#4fc3f7"     # list markers
+MATH_COLOR = "#c792ea"       # math formulas
 DIM = "#8a93a3"
 
 _INLINE_STYLE = {
@@ -65,6 +69,54 @@ def img_src(img: Tag) -> str:
     return ""
 
 
+def is_equation(img: Tag) -> bool:
+    """True if the img is a math formula (zhihu equation image)."""
+    src = (img.get("src") or "").lower()
+    if "equation" in src or "formula" in src:
+        return True
+    cls = (img.get("class") or "").lower()
+    if "formula" in cls or "equation" in cls:
+        return True
+    alt = img.get("alt") or ""
+    return "\\" in alt
+
+
+def is_inline_equation(img: Tag) -> bool:
+    """eeimg='1' marks inline formulas; block formulas have no eeimg.
+
+    Multi-line constructs (\begin{...}) are always treated as display math.
+    """
+    if img.get("eeimg") != "1":
+        return False
+    return "\\begin{" not in equation_latex(img)
+
+
+def equation_latex(img: Tag) -> str:
+    alt = (img.get("alt") or "").strip()
+    if alt:
+        return alt
+    src = img.get("src") or ""
+    m = re.search(r"[?&]tex=([^&]+)", src)
+    if m:
+        return unquote(m.group(1))
+    return ""
+
+
+def math_text(img: Tag, inline: bool) -> Text:
+    """Convert a formula img to a styled rich Text.
+
+    Inline formulas stay single-line inside the paragraph; display formulas
+    become their own (possibly multi-line, utftex-typeset) block.
+    """
+    latex = equation_latex(img)
+    out = render_math(latex, inline=inline)
+    if not out.strip():
+        return Text("", style=MATH_COLOR)
+    if inline:
+        return Text(out, style=f"italic {MATH_COLOR}")
+    return Text(out, style=f"{MATH_COLOR}")
+
+
 def inline(node: Tag) -> Text:
     """Render inline content of a tag into a rich Text."""
     t = Text()
@@ -79,6 +131,13 @@ def inline(node: Tag) -> Text:
                 t.append("\n")
                 continue
             if name == "img":
+                if is_equation(child):
+                    # inline formulas stay in the paragraph flow
+                    t.append_text(math_text(child, inline=True))
+                    continue
+                # display formulas are extracted by the block walker
+                if not is_inline_equation(child):
+                    continue
                 u = img_src(child)
                 if u:
                     t.append(" [图片] ", style=f"bold {LINK_COLOR}")
@@ -124,10 +183,18 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
                 blocks.append(Block("h", t))
             elif name == "p":
                 imgs = [img_src(i) for i in child.find_all("img")]
+                display_eqs = [
+                    i
+                    for i in child.find_all("img")
+                    if is_equation(i) and not is_inline_equation(i)
+                ]
                 t = inline(child)
                 plain = t.plain.replace("[图片]", "").strip()
                 if plain:
                     blocks.append(Block("p", t))
+                # display formulas become their own centered block
+                for eq in display_eqs:
+                    blocks.append(Block("math", math_text(eq, inline=False)))
                 if imgs:
                     add_img(imgs)
             elif name == "blockquote":
