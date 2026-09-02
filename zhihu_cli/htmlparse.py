@@ -2,9 +2,9 @@
 
 Element -> style mapping (color / bold / background):
   h1-h3     bold bright cyan
-  blockquote italic light-blue text on dark blue background
-  pre/code  amber text on dark background
-  a         blue + underline
+  blockquote italic text (block styling belongs to CSS)
+  pre/code  semantic text coloring (block styling belongs to CSS)
+  a         themed background + underline in the UI renderer
   strong/b  bold        em/i italic        del/s strikethrough dim
   ul/ol     colored bullets / numbers
   table     cells joined with vertical bars, header bold
@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from urllib.parse import unquote, urljoin
 
 from bs4 import BeautifulSoup, NavigableString, Tag
+from rich.cells import cell_len
 from rich.text import Text
 
 from . import config
@@ -26,10 +27,71 @@ from .mathtex import render_math
 BASE = "https://www.zhihu.com"
 
 H_COLOR = "#4fc3f7"          # headings
+# per-level heading colors (h1 主标题 / h2 次标题 / h3 小节)
+H_COLORS = {"h1": "#4fc3f7", "h2": "#a78bfa", "h3": "#34d399"}
 QUOTE_COLOR = "#b8c9e0"      # blockquote text
-QUOTE_BG = "#1d2b3f"         # blockquote background
 CODE_COLOR = "#e6b450"       # code text
 CODE_BG = "#20222a"          # code background
+
+# --- semantic coloring for <pre> code blocks -------------------------
+_CODE_BASE = "#d7dee8"
+_CODE_KW = "#f97583"
+_CODE_STR = "#7ee787"
+_CODE_COM = "#7d8590"
+_CODE_NUM = "#e6b450"
+_CODE_FN = "#82aaff"
+_CODE_KW_SET = {
+    "def", "class", "if", "elif", "else", "for", "while", "return", "import",
+    "from", "as", "try", "except", "finally", "raise", "with", "lambda",
+    "pass", "break", "continue", "yield", "global", "nonlocal", "del",
+    "and", "or", "not", "in", "is", "None", "True", "False", "async", "await",
+    "function", "const", "let", "var", "new", "this", "typeof", "of",
+    "ifdef", "endif", "include", "pragma", "struct", "enum", "union",
+    "typedef", "static", "extern", "register", "volatile", "goto", "sizeof",
+    "switch", "case", "default", "do", "int", "float", "double", "char",
+    "void", "long", "short", "unsigned", "signed", "bool", "string",
+    "fn", "pub", "mut", "impl", "trait", "mod", "use", "let", "match",
+    "package", "select", "where", "order", "group", "by", "having",
+    "insert", "update", "delete", "into", "values", "set", "join",
+    "inner", "outer", "limit", "offset", "create", "table", "drop",
+    "alter", "add", "primary", "key", "foreign", "references", "unique",
+    "index", "begin", "commit", "rollback", "and", "or", "not", "null",
+    "print", "echo", "require", "json", "true", "false",
+}
+_CODE_RE = re.compile(
+    r"""("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`)"""  # string
+    r"""|(//[^\n]*|#[^\n]*|/\*.*?\*/|--[^\n]*)"""           # comment
+    r"""|(\b\d[\w.]*\b)"""                                  # number
+    r"""|([A-Za-z_][\w]*(?=\s*\())"""                       # function call
+    r"""|([A-Za-z_][\w]*)"""                                # word
+)
+
+
+def highlight_code(code: str) -> Text:
+    """Lightweight semantic highlighting for code blocks."""
+    t = Text(style=_CODE_BASE)
+    last = 0
+    for m in _CODE_RE.finditer(code):
+        if m.start() > last:
+            t.append(code[last : m.start()])
+        s, com, num, fn, word = m.groups()
+        if s is not None:
+            t.append(s, style=_CODE_STR)
+        elif com is not None:
+            t.append(com, style=f"italic {_CODE_COM}")
+        elif num is not None:
+            t.append(num, style=_CODE_NUM)
+        elif fn is not None:
+            t.append(fn, style=_CODE_FN)
+        elif word is not None:
+            if word in _CODE_KW_SET:
+                t.append(word, style=f"bold {_CODE_KW}")
+            else:
+                t.append(word)
+        last = m.end()
+    if last < len(code):
+        t.append(code[last:])
+    return t
 LINK_COLOR = "#5eb4f8"       # links
 BULLET_COLOR = "#4fc3f7"     # list markers
 MATH_COLOR = "#c792ea"       # math formulas
@@ -60,6 +122,10 @@ class Block:
     items: list[Text] = field(default_factory=list)
     rows: list[list[str]] = field(default_factory=list)
     caption: str = ""
+    # clickable link spans: (start, end, url) into self.text.plain
+    links: list[tuple[int, int, str]] = field(default_factory=list)
+    # per-item link spans for list blocks (offsets relative to each item)
+    item_links: list[list[tuple[int, int, str]]] = field(default_factory=list)
 
 
 def img_src(img: Tag) -> str:
@@ -126,8 +192,9 @@ def equation_latex(img: Tag) -> str:
 def math_text(img: Tag, inline: bool) -> Text:
     """Convert a formula img to a styled rich Text.
 
-    Inline formulas stay single-line inside the paragraph; display formulas
-    become their own (possibly multi-line, utftex-typeset) block.
+    Inline formulas stay single-line inside the paragraph; display
+    formulas become their own (utftex-typeset, possibly multi-line)
+    block — utftex CLI is authoritative for display math.
     """
     latex = equation_latex(img)
     out = render_math(latex, inline=inline)
@@ -138,8 +205,35 @@ def math_text(img: Tag, inline: bool) -> Text:
     return Text(out, style=f"{MATH_COLOR}")
 
 
-def inline(node: Tag) -> Text:
-    """Render inline content of a tag into a rich Text."""
+# Strict URL matcher (http/https).  Matches URLs even when they appear as
+# plain text (not wrapped in <a>), then trims trailing punctuation.
+_URL_RE = re.compile(r"(?i)\bhttps?://[^\s<>\"'“”‘’]+")
+_URL_TRAIL = set(".,;:!?。，；：！？…)]}\"'")
+
+
+def find_urls(text: str) -> list[tuple[int, int, str]]:
+    """Return (start, end, url) for every URL found in ``text``."""
+    out: list[tuple[int, int, str]] = []
+    for m in _URL_RE.finditer(text):
+        s, e = m.start(), m.end()
+        url = text[s:e]
+        while url and url[-1] in _URL_TRAIL:
+            url = url[:-1]
+            e -= 1
+        while url.endswith(")") and url.count("(") < url.count(")"):
+            url = url[:-1]
+            e -= 1
+        if url and "http://" != url and "https://" != url:
+            out.append((s, e, url))
+    return out
+
+
+def inline(node: Tag, links: list[tuple[int, int, str]] | None = None) -> Text:
+    """Render inline content of a tag into a rich Text.
+
+    If ``links`` is given, ``(start, end, url)`` tuples for every ``<a>``
+    are appended (offsets into the returned Text's plain text).
+    """
     t = Text()
     for child in node.children:
         if isinstance(child, NavigableString):
@@ -163,11 +257,70 @@ def inline(node: Tag) -> Text:
                 if u:
                     t.append(" [图片] ", style=f"bold {LINK_COLOR}")
                 continue
-            sub = inline(child)
+            if name == "sup":
+                # Inspect first without exporting nested anchor offsets: a
+                # reference marker is rewritten below and its old offsets no
+                # longer correspond to the parent text.
+                sub = inline(child, None)
+                classes = _classes(child).lower()
+                href = ""
+                anchor = child.find("a")
+                if anchor is not None:
+                    href = (anchor.get("href") or "").strip()
+                is_reference = (
+                    "reference" in classes
+                    or "footnote" in classes
+                    or any(child.get(key) for key in ("data-numero", "data-number", "data-index"))
+                    or bool(re.search(r"(?:#|/)(?:ref|footnote)[-_]?\d+", href, re.I))
+                )
+                if is_reference:
+                    number = (
+                        child.get("data-numero")
+                        or child.get("data-number")
+                        or child.get("data-index")
+                        or sub.plain.strip().strip("[]")
+                    )
+                    if not number:
+                        match = re.search(r"(\d+)", href)
+                        number = match.group(1) if match else "?"
+                    sub = Text(f"[{number}]", style="bold")
+                else:
+                    sub.stylize("dim")
+                t.append_text(sub)
+                continue
+            if name == "a":
+                sub = inline(child, None)
+                href = (child.get("href") or "").strip()
+                # Zhihu link-card anchors are intentionally empty; their
+                # visible label lives in data-text instead of textContent.
+                if not sub.plain.strip():
+                    label = (
+                        child.get("data-text")
+                        or child.get("title")
+                        or child.get("aria-label")
+                        or ""
+                    ).strip()
+                    if label:
+                        sub = Text(label)
+                if href:
+                    start = len(t.plain)
+                    sub.stylize(f"underline {LINK_COLOR}")
+                    t.append_text(sub)
+                    end = len(t.plain)
+                    if links is not None:
+                        links.append((start, end, urljoin(BASE, href)))
+                    continue
+                t.append_text(sub)
+                continue
+            child_links: list[tuple[int, int, str]] = []
+            sub = inline(child, child_links)
             style = _INLINE_STYLE.get(name)
             if style:
                 sub.stylize(style)
+            offset = len(t.plain)
             t.append_text(sub)
+            if links is not None:
+                links.extend((s + offset, e + offset, url) for s, e, url in child_links)
     return t
 
 
@@ -199,9 +352,11 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
             if name in _SKIP_TAGS:
                 continue
             if name in ("h1", "h2", "h3", "h4", "h5", "h6"):
-                t = inline(child)
-                t.stylize(f"bold {H_COLOR}" if name in ("h1", "h2", "h3") else "bold")
-                blocks.append(Block("h", t))
+                h_links: list[tuple[int, int, str]] = []
+                t = inline(child, h_links)
+                color = H_COLORS.get(name)
+                t.stylize(f"bold {color}" if color else "bold")
+                blocks.append(Block("h", t, links=h_links))
             elif name == "p":
                 imgs = [
                     img_src(i)
@@ -213,32 +368,38 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
                     for i in child.find_all("img")
                     if is_equation(i) and not is_inline_equation(i)
                 ]
-                t = inline(child)
+                p_links: list[tuple[int, int, str]] = []
+                t = inline(child, p_links)
                 plain = t.plain.replace("[图片]", "").strip()
                 if plain:
-                    blocks.append(Block("p", t))
+                    blocks.append(Block("p", t, links=p_links))
                 # display formulas become their own centered block
                 for eq in display_eqs:
                     blocks.append(Block("math", math_text(eq, inline=False)))
                 if imgs:
                     add_img(imgs)
             elif name == "blockquote":
-                t = inline(child)
+                q_links: list[tuple[int, int, str]] = []
+                t = inline(child, q_links)
                 if t.plain.strip():
-                    t.stylize(f"italic {QUOTE_COLOR} on {QUOTE_BG}")
-                    blocks.append(Block("quote", t))
+                    t.stylize(f"italic {QUOTE_COLOR}")
+                    blocks.append(Block("quote", t, links=q_links))
             elif name == "pre":
-                t = Text(child.get_text(), style=f"{CODE_COLOR} on {CODE_BG}")
+                t = highlight_code(child.get_text())
                 blocks.append(Block("code", t))
             elif name in ("ul", "ol"):
                 items: list[Text] = []
+                item_links: list[list[tuple[int, int, str]]] = []
                 ordered = name == "ol"
                 for i, li in enumerate(child.find_all("li", recursive=False), 1):
                     marker = f"{i}. " if ordered else "• "
+                    li_links: list[tuple[int, int, str]] = []
                     t = Text(marker, style=f"bold {BULLET_COLOR}")
-                    t.append_text(inline(li))
+                    t.append_text(inline(li, li_links))
+                    off = len(marker)
+                    item_links.append([(s + off, e + off, u) for s, e, u in li_links])
                     items.append(t)
-                blocks.append(Block("list", items=items))
+                blocks.append(Block("list", items=items, item_links=item_links))
             elif name == "img":
                 if is_equation(child):
                     # display (block) formula -> math text block
@@ -259,12 +420,15 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
                     if not is_equation(i) and formula_img_visible(i)
                 ]
                 cap = child.find("figcaption")
-                caption = inline(cap).plain.strip() if cap else ""
+                cap_links: list[tuple[int, int, str]] = []
+                caption = inline(cap, cap_links).plain.strip() if cap else ""
                 for eq in eqs:
                     blocks.append(Block("math", math_text(eq, inline=False)))
                 add_img(imgs, caption)
                 if cap and caption:
-                    blocks.append(Block("figcap", Text(caption, style=f"dim {DIM}")))
+                    blocks.append(
+                        Block("figcap", Text(caption, style=f"dim {DIM}"), links=cap_links)
+                    )
             elif name == "hr":
                 blocks.append(Block("hr", Text("━" * 16, style=f"dim {DIM}")))
             elif name == "table":
@@ -275,28 +439,103 @@ def parse_html(html: str) -> tuple[list[Block], list[str]]:
                     ]
                     rows.append(cells)
                 blocks.append(Block("table", rows=rows))
+            elif name == "a":
+                # Block link cards are top-level empty anchors. Calling
+                # inline(child) would only inspect their (empty) children.
+                label = (
+                    child.get_text(strip=True)
+                    or child.get("data-text")
+                    or child.get("title")
+                    or child.get("aria-label")
+                    or ""
+                ).strip()
+                href = (child.get("href") or "").strip()
+                if label:
+                    text = Text(label, style=f"underline {LINK_COLOR}")
+                    links = [(0, len(label), urljoin(BASE, href))] if href else []
+                    blocks.append(Block("p", text, links=links))
             elif name in ("div", "section", "center", "article", "details", "summary"):
                 walk(child)
             else:
-                t = inline(child)
+                e_links: list[tuple[int, int, str]] = []
+                t = inline(child, e_links)
                 if t.plain.strip():
-                    blocks.append(Block("p", t))
+                    blocks.append(Block("p", t, links=e_links))
 
     body = soup.body or soup
     walk(body)
     return blocks, images
 
 
+TABLE_BORDER = "#2a3140"
+TABLE_MAX_COL = 36  # per-column width cap; long cells wrap across lines
+
+
+def _wrap_text(s: str, width: int) -> list[str]:
+    """Wrap a cell string to ``width`` terminal columns (cell-width aware)."""
+    s = s.replace("\n", " ").strip()
+    out: list[str] = []
+    cur = ""
+    cur_w = 0
+    for ch in s:
+        w = cell_len(ch)
+        if cur and cur_w + w > width:
+            out.append(cur)
+            cur, cur_w = "", 0
+        cur += ch
+        cur_w += w
+    if cur or not out:
+        out.append(cur)
+    return out
+
+
 def table_to_text(block: Block) -> Text:
+    """Render a table as an aligned, box-drawn block.
+
+    Column widths are computed cell-width aware (CJK friendly), long cells
+    wrap onto extra lines, and the header row is bold.  Border lines use a
+    dim color so they stay unobtrusive.
+    """
+    rows = [[(c or "").replace("\n", " ").strip() for c in r] for r in block.rows]
+    if not rows:
+        return Text("")
+    ncols = max(len(r) for r in rows)
+    norm = [r + [""] * (ncols - len(r)) for r in rows]
+
+    widths: list[int] = []
+    for c in range(ncols):
+        w = max((cell_len(r[c]) for r in norm), default=0)
+        widths.append(max(1, min(w, TABLE_MAX_COL)))
+
+    cells = [[_wrap_text(r[c], widths[c]) for c in range(ncols)] for r in norm]
+
+    def border(left: str, mid: str, right: str) -> Text:
+        line = left + mid.join("─" * (w + 2) for w in widths) + right
+        return Text(line, style=f"dim {TABLE_BORDER}")
+
+    def row_lines(r: int, header: bool = False) -> list[Text]:
+        max_lines = max(len(cells[r][c]) for c in range(ncols))
+        out: list[Text] = []
+        for li in range(max_lines):
+            parts = []
+            for c in range(ncols):
+                txt = cells[r][c][li] if li < len(cells[r][c]) else ""
+                pad = " " * (widths[c] - cell_len(txt))
+                parts.append(f" {txt}{pad} ")
+            out.append(Text("│".join(parts), style="bold" if header else None))
+        return out
+
     t = Text()
-    for i, row in enumerate(block.rows):
-        cells = [c.replace("\n", " ").strip() for c in row]
-        line = " │ ".join(cells)
-        if i == 0:
-            t.append(line, style="bold")
-        else:
-            t.append(line)
+    t.append_text(border("┌", "┬", "┐"))
+    t.append("\n")
+    for ln in row_lines(0, header=True):
+        t.append_text(ln)
         t.append("\n")
-    if t.plain.endswith("\n"):
-        t.plain = t.plain.rstrip("\n")
+    t.append_text(border("├", "┼", "┤"))
+    t.append("\n")
+    for r in range(1, len(cells)):
+        for ln in row_lines(r):
+            t.append_text(ln)
+            t.append("\n")
+    t.append_text(border("└", "┴", "┘"))
     return t

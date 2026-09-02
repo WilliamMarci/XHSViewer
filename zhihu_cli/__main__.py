@@ -49,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--login", action="store_true", help="强制重新登录")
     ap.add_argument("--cookies", help="直接提供 Cookie 字符串（形如 d_c0=xxx; z_c0=yyy）")
+    ap.add_argument("url", nargs="?", help="直接打开某个知乎链接（question/answer/zhuanlan/zvideo）")
     args = ap.parse_args(argv)
 
     from . import kitty
@@ -94,7 +95,17 @@ def main(argv: list[str] | None = None) -> int:
     from .ui import ZhihuApp
 
     print(f"欢迎，{user.get('name', '')}  ↑↓ 选择 · Enter 展开 · o 浏览器打开 · q 退出", file=sys.stderr)
-    ZhihuApp(client, user, cell_size=cell).run()
+
+    initial_item = None
+    if args.url:
+        try:
+            print(f"正在打开链接：{args.url}", file=sys.stderr)
+            initial_item = client.fetch_url(args.url)
+        except ZhihuError as e:
+            print(f"✗ 打开链接失败：{e}", file=sys.stderr)
+            return 1
+
+    ZhihuApp(client, user, cell_size=cell, initial_item=initial_item).run()
     return 0
 
 

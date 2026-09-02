@@ -1,28 +1,245 @@
 /* zhihu-cli theme: simple, modern, compact */
 
 Screen {
-    background: #0f1115;
+    background: $background;
 }
 
+/* All chrome uses Textual theme variables so GO > 切换主题 updates it live. */
 TopBar {
     width: 100%;
     height: 1;
-    background: #171a21;
+    background: $surface;
     padding: 0 1;
+    color: $text;
 }
 
-Footer {
-    background: #171a21;
-    color: #8a93a3;
+.answer-topbar {
+    width: 100%;
+    height: 1;
+    background: $surface;
 }
 
-StatusLine {
-    dock: bottom;
+#answer-back {
+    width: auto;
+    min-width: 0;
+    height: 1;
+    border: none;
+    padding: 0 2;
+    background: $surface;
+    color: $text-muted;
+    text-style: bold;
+}
+
+.answer-question-row {
+    width: 100%;
+    height: 1;
+}
+
+#answer-question {
+    width: 3;
+    min-width: 3;
+    height: 1;
+    border: none;
+    padding: 0;
+    background: $primary;
+    color: $text;
+    text-style: bold;
+}
+
+#answer-question-title {
+    width: 1fr;
+    height: 1;
+    padding: 0 0 0 1;
+}
+
+#answer-meta {
+    width: 100%;
+    height: auto;
+}
+
+#answer-back:hover,
+#answer-back:focus,
+#answer-question:hover,
+#answer-question:focus {
+    background: $primary;
+    color: $text;
+}
+
+.answer-topbar-title {
+    width: 1fr;
     height: 1;
     padding: 0 1;
-    color: #38bdf8;
+    color: $text;
+}
+
+/* one-row bottom bar: mode badge + spinner + key hints */
+BottomBar {
+    dock: bottom;
+    height: 1;
+    background: $panel;
+    padding: 0;
+    color: $text-muted;
+}
+
+#bottom-mode,
+#bottom-go,
+.bottom-action {
+    width: auto;
+    min-width: 0;
+    height: 1;
+    border: none;
+    padding: 0 2;
+    margin: 0;
+    color: $text;
+    background: $panel;
+}
+
+#bottom-mode {
     text-style: bold;
-    background: #171a21;
+}
+
+#bottom-go {
+    background: $primary;
+    color: $text;
+    text-style: bold;
+}
+
+#bottom-mode:hover,
+#bottom-mode:focus,
+#bottom-go:hover,
+#bottom-go:focus,
+.bottom-action:hover,
+.bottom-action:focus {
+    background: $surface-active;
+    color: $text;
+}
+
+#bottom-status {
+    width: auto;
+    height: 1;
+    color: $accent;
+    text-style: bold;
+}
+
+#bottom-actions {
+    width: auto;
+    height: 1;
+}
+
+.bottom-fill {
+    width: 1fr;
+    height: 1;
+}
+
+/* bottom-bar loading spinner (only while busy) */
+StatusLine {
+    height: 1;
+    padding: 0 1 0 0;
+    color: $accent;
+    text-style: bold;
+}
+
+/* feed top bar: tabs + right-aligned username */
+.topbar {
+    height: 1;
+    background: $surface;
+    padding: 0 1;
+}
+
+.tb-title {
+    width: auto;
+    height: 1;
+    color: $text;
+}
+
+#tab-rec,
+#tab-hot,
+#tab-history {
+    height: 1;
+    border: none;
+    min-width: 0;
+    padding: 0 2;
+    color: $text-muted;
+}
+
+HistoryEntry {
+    height: auto;
+    margin: 0;
+    padding: 0;
+    background: $surface;
+}
+
+.history-heading,
+.history-empty,
+HistoryEndRule {
+    height: auto;
+    margin: 0;
+}
+
+.history-empty {
+    margin: 0 1;
+}
+
+HistoryAnswerRow {
+    height: 1;
+    margin: 0 1;
+    padding: 0 1;
+    color: $text;
+    background: $surface;
+}
+
+HistoryAnswerRow:hover,
+HistoryAnswerRow:focus {
+    background: $surface;
+    color: $accent;
+    text-style: bold;
+}
+
+PageSearchBar {
+    height: 1;
+    width: 100%;
+    background: $surface;
+}
+
+#page-search-input {
+    height: 1;
+    width: 1fr;
+    border: none;
+    padding: 0 1;
+    background: $surface;
+}
+
+#page-search-status {
+    height: 1;
+    width: auto;
+    min-width: 7;
+    color: $text-muted;
+    text-align: right;
+}
+
+.page-search-up,
+.page-search-down,
+.page-search-close {
+    height: 1;
+    width: auto;
+    min-width: 0;
+    border: none;
+    padding: 0 2;
+    background: $panel;
+    color: $text;
+}
+
+.tab.tab-active {
+    background: $primary;
+    color: $text;
+    text-style: bold;
+}
+
+.tb-user {
+    width: 1fr;
+    height: 1;
+    text-align: right;
+    color: $text-muted;
 }
 
 #feed {
@@ -31,24 +248,24 @@ StatusLine {
 
 .hint {
     margin: 1 2;
-    color: #8a93a3;
+    color: $text-muted;
 }
 
 Card {
-    margin: 0 1 1 1;
+    margin: 0 1;
     padding: 1 2;
-    border: round #232a36;
-    background: #141821;
+    border: round $border;
+    background: $surface;
 }
 
 Card:hover {
-    background: #1a202c;
-    border: round #38bdf8;
+    background: $boost;
+    border: round $accent;
 }
 
 Card:focus {
-    border: round #38bdf8;
-    background: #182130;
+    border: round $accent;
+    background: $primary-background;
 }
 
 #content {
@@ -59,8 +276,8 @@ AnswerHeader {
     height: auto;
     max-height: 8;
     padding: 1 2 1 2;
-    border-bottom: solid #232a36;
-    background: #10141c;
+    border-bottom: solid $border;
+    background: $surface;
 }
 
 .playbtn {
@@ -77,22 +294,37 @@ AnswerHeader {
 
 .meta {
     margin: 0 1;
-    color: #8a93a3;
+    color: $text-muted;
 }
 
 .rule {
-    color: #2a3140;
+    color: $border;
     margin: 0 0 1 0;
 }
 
 .math {
     text-align: center;
+    width: 100%;
     margin: 1 2;
 }
 
 .imgsec {
     height: auto;
     margin: 1 0 0 0;
+    align: left top;
+}
+
+.img-inline {
+    width: auto;
+    height: auto;
+}
+
+.img-caption {
+    width: 100%;
+    height: auto;
+    margin: 0 1;
+    text-align: left;
+    color: $text-muted;
 }
 
 .imgbtn {
@@ -103,6 +335,95 @@ AnswerHeader {
     margin: 0 1;
     text-align: left;
     content-align: left middle;
+}
+
+.img-actions {
+    width: 100%;
+    height: 1;
+    align: left middle;
+}
+
+.img-collapse {
+    width: auto;
+    min-width: 0;
+    height: 1;
+    border: none;
+    padding: 0 2;
+    margin: 0 1;
+    color: $text-muted;
+}
+
+/* one-line "open link" buttons shown ahead of URLs */
+.linkbtn {
+    height: auto;
+    min-height: 1;
+    border: none;
+    min-width: 0;
+    padding: 0 2;
+    margin: 1 1 0 1;
+    text-align: left;
+    content-align: left middle;
+    color: $link-color;
+    background: $link-background;
+    text-style: underline;
+}
+
+/* one-line "expand table" button for wide tables */
+.tablebtn {
+    height: 1;
+    border: none;
+    min-width: 0;
+    padding: 0 2;
+    margin: 1 1 0 1;
+    text-align: left;
+    content-align: left middle;
+    color: $secondary;
+}
+
+/* full-table popup */
+#table-panel {
+    width: 100%;
+    height: 100%;
+    background: $panel;
+    border: round $secondary;
+    padding: 1 1;
+}
+
+#table-scroll {
+    height: 1fr;
+    margin-top: 1;
+    background: $background;
+}
+
+#table-body {
+    width: auto;
+    height: auto;
+    padding: 0 1;
+}
+
+/* block code: full-width background block, semantic colors on light text,
+   0 blank rows around the colored area (no vertical padding) */
+.codeblock {
+    background: $panel;
+    color: $text;
+    padding: 0 2;
+    margin: 0;
+    width: 100%;
+}
+
+/* blockquote: full-width background block with a continuous left bar,
+   0 blank rows around the colored area (no vertical padding) */
+.quoteblock {
+    background: $primary-background;
+    border-left: thick $accent;
+    padding: 0 2;
+    margin: 0;
+    width: 100%;
+}
+
+/* cursor-mode highlight on link-bearing paragraphs */
+ClickableText:focus {
+    background: $primary-background;
 }
 
 .row {
@@ -122,14 +443,14 @@ AnswerHeader {
 #cmt-panel {
     width: 100%;
     height: 100%;
-    background: #12161f;
-    border: round #38bdf8;
+    background: $panel;
+    border: round $accent;
     padding: 1 1;
 }
 
 .cmt-title {
     height: 1;
-    background: #171a21;
+    background: $panel;
     padding: 0 1;
     text-style: bold;
 }
@@ -139,18 +460,50 @@ AnswerHeader {
     margin-top: 1;
 }
 
+/* url prompt (Ctrl+O) */
+#url-panel {
+    width: 72;
+    max-width: 90%;
+    height: auto;
+    background: $panel;
+    border: round $accent;
+    padding: 1 1;
+}
+
+SearchPromptScreen,
+UrlPromptScreen {
+    align: center top;
+    padding-top: 1;
+}
+
+.modebtn {
+    width: auto;
+    min-width: 0;
+    height: 1;
+    border: none;
+    padding: 0 2;
+    margin: 0 1 0 0;
+}
+
+#url-input {
+    margin: 1 1;
+    border: solid $border;
+    background: $background;
+    color: $text;
+}
+
 .comment {
     margin: 0 1 0 1;
     padding: 1 0 1 0;
-    border-bottom: solid #1e2430;
+    border-bottom: solid $border;
 }
 
 #iviewer-hint {
     width: 100%;
     dock: top;
     height: 1;
-    background: #171a21;
-    color: #8a93a3;
+    background: $panel;
+    color: $text-muted;
     padding: 0 1;
 }
 
@@ -163,4 +516,42 @@ AnswerHeader {
 #iviewer-grid {
     width: auto;
     height: auto;
+}
+
+#iviewer-footer {
+    dock: bottom;
+    width: 100%;
+    height: 1;
+    background: $panel;
+}
+
+#iviewer-back {
+    width: auto;
+    min-width: 0;
+    height: 1;
+    border: none;
+    padding: 0 2;
+    background: $panel;
+    color: $text;
+}
+
+#iviewer-back:hover,
+#iviewer-back:focus {
+    background: $primary;
+}
+
+#iviewer-caption {
+    width: 1fr;
+    height: 1;
+    padding: 0 1;
+    text-align: left;
+    color: $text-muted;
+}
+
+#iviewer-status {
+    width: auto;
+    height: 1;
+    padding: 0 1;
+    text-align: right;
+    color: $text-muted;
 }

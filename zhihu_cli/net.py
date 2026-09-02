@@ -8,6 +8,7 @@ import os
 import re
 import select
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -94,6 +95,7 @@ class FeedItem:
     video_url: str = ""  # zvideo play url
     qid: str = ""  # question id (answers)
     aid: str = ""  # answer id (answers / articles)
+    rank: int = 0  # hot-list ranking (0 = not a ranked feed)
 
     @property
     def badge(self) -> str:
@@ -113,6 +115,7 @@ class Comment:
     content: str = ""
     votes: int = 0
     created: int = 0
+    reply_to: str = ""
 
 
 def fmt_num(n: int | None) -> str:
@@ -198,6 +201,13 @@ def _excerpt(target: dict, content: str = "") -> str:
     if not e and content:
         e = strip_html(content)
     return (e or "")[:200]
+
+
+def _hot_rank(raw: dict, index: int) -> int:
+    """Parse the hot-list rank from the raw item's ``detail_text`` (e.g.
+    ``"1"`` / ``"2"``), falling back to the list position."""
+    m = re.match(r"\s*(\d+)", str(raw.get("detail_text") or ""))
+    return int(m.group(1)) if m else index
 
 
 def normalize_item(raw: dict) -> FeedItem | None:
@@ -299,6 +309,7 @@ def normalize_item(raw: dict) -> FeedItem | None:
             comments=int(target.get("comment_count") or 0),
             created=_time(target),
             url=f"{BASE}/question/{tid}" if tid else (target.get("url") or ""),
+            qid=str(tid),
         )
     elif typ == "pin":
         content = target.get("content") or ""
@@ -392,6 +403,211 @@ class ZhihuSession:
         is_end = bool(paging.get("is_end")) or not items
         return items, is_end
 
+    def hot_list(self, limit: int = 50):
+        """Zhihu 热榜 (single ranked page; no pagination).
+
+        Returns (items, is_end).  Each item carries its rank number.
+        """
+        r = self.s.get(
+            f"{BASE}/api/v3/feed/topstory/hot-list-web",
+            params={"limit": limit, "desktop": "true"},
+            timeout=15,
+        )
+        if r.status_code in (401, 403):
+            raise NotLoggedIn("登录已过期，请重新登录：zhihu --login")
+        r.raise_for_status()
+        j = r.json()
+        items = []
+        for idx, raw in enumerate(j.get("data", []), 1):
+            target = raw.get("target") or {}
+            if raw.get("type") == "hot_list_feed":
+                link = (target.get("link") or {}).get("url") or ""
+                match = re.search(r"/question/(\d+)", link)
+                image = (target.get("image_area") or {}).get("url") or ""
+                item = FeedItem(
+                    kind="question",
+                    rid=str(raw.get("id") or raw.get("card_id") or ""),
+                    title=(target.get("title_area") or {}).get("text") or "",
+                    excerpt=(target.get("excerpt_area") or {}).get("text") or "",
+                    url=link,
+                    images=[image] if image else [],
+                    qid=match.group(1) if match else "",
+                    rank=idx,
+                )
+            else:
+                item = normalize_item(raw)
+                if item:
+                    item.rank = _hot_rank(raw, idx)
+            if item and item.title:
+                items.append(item)
+        return items, True
+
+    # ------------------------------------------------------------------
+    # open a specific zhihu page by URL (command line / Ctrl+O)
+    # ------------------------------------------------------------------
+
+    def fetch_url(self, url: str) -> FeedItem:
+        """Resolve a zhihu URL into a content item for the viewer."""
+        url = (url or "").strip()
+        m = re.search(r"zhihu\.com/question/(\d+)(?:/answer/(\d+))?", url)
+        if m:
+            qid, aid = m.group(1), m.group(2)
+            if aid:
+                return self._fetch_answer(aid, qid)
+            return self._fetch_question(qid)
+        m = re.search(r"(?:zhuanlan\.zhihu\.com/p/|zhihu\.com/(?:p|article)/)(\d+)", url)
+        if m:
+            return self._fetch_article(m.group(1))
+        m = re.search(r"zhihu\.com/zvideo/(\d+)", url)
+        if m:
+            return self._fetch_zvideo(m.group(1))
+        raise ZhihuError("无法识别的知乎链接（支持 question / answer / zhuanlan / zvideo）")
+
+    def _fetch_answer(self, aid: str, qid: str = "") -> FeedItem:
+        r = self.s.get(
+            f"{BASE}/api/v4/answers/{aid}",
+            params={"include": self._ANSWERS_INCLUDE},
+            timeout=15,
+        )
+        if r.status_code in (401, 403):
+            raise NotLoggedIn("登录已过期，请重新登录：zhihu --login")
+        r.raise_for_status()
+        j = r.json()
+        q = j.get("question") or {}
+        qid = str(q.get("id") or qid)
+        content = j.get("content") or ""
+        item = FeedItem(
+            kind="answer",
+            rid=str(j.get("id") or aid),
+            title=(q.get("title") or j.get("title") or ""),
+            author=(j.get("author") or {}).get("name") or "",
+            excerpt=j.get("excerpt") or "",
+            votes=int(j.get("voteup_count") or 0),
+            comments=int(j.get("comment_count") or 0),
+            created=int(j.get("created_time") or 0),
+            url=f"{BASE}/question/{qid}/answer/{j.get('id') or aid}",
+            content=content,
+            images=extract_images(content),
+            qid=qid,
+            aid=str(j.get("id") or aid),
+        )
+        return item
+
+    def _fetch_question(self, qid: str) -> FeedItem:
+        r = self.s.get(f"{BASE}/api/v4/questions/{qid}", timeout=15)
+        if r.status_code in (401, 403):
+            raise NotLoggedIn("登录已过期，请重新登录：zhihu --login")
+        r.raise_for_status()
+        j = r.json()
+        item = FeedItem(
+            kind="question",
+            rid=str(qid),
+            title=j.get("title") or "",
+            author=(j.get("author") or {}).get("name") or "",
+            excerpt=j.get("detail") or "",
+            votes=int(j.get("voteup_count") or 0),
+            comments=int(j.get("comment_count") or 0),
+            created=int(j.get("created_time") or 0),
+            url=f"{BASE}/question/{qid}",
+            qid=str(qid),
+        )
+        return item
+
+    def _fetch_article(self, pid: str) -> FeedItem:
+        r = self.s.get(f"{BASE}/api/v4/articles/{pid}", timeout=15)
+        if r.status_code in (401, 403):
+            raise NotLoggedIn("登录已过期，请重新登录：zhihu --login")
+        r.raise_for_status()
+        j = r.json()
+        content = j.get("content") or ""
+        return FeedItem(
+            kind="article",
+            rid=str(pid),
+            title=j.get("title") or "",
+            author=(j.get("author") or {}).get("name") or "",
+            excerpt=j.get("excerpt") or "",
+            votes=int(j.get("voteup_count") or 0),
+            comments=int(j.get("comment_count") or 0),
+            created=int(j.get("created_time") or 0),
+            url=f"https://zhuanlan.zhihu.com/p/{pid}",
+            content=content,
+            images=extract_images(content),
+            aid=str(pid),
+        )
+
+    def _fetch_zvideo(self, zid: str) -> FeedItem:
+        r = self.s.get(f"{BASE}/api/v4/zvideos/{zid}", timeout=15)
+        if r.status_code in (401, 403):
+            raise NotLoggedIn("登录已过期，请重新登录：zhihu --login")
+        r.raise_for_status()
+        j = r.json()
+        video = j.get("video") or {}
+        thumb = video.get("thumbnail") or ""
+        play = ""
+        for quality in ("hd", "sd", "ld"):
+            q = (video.get("playlist") or {}).get(quality) or {}
+            if q.get("play_url"):
+                play = q["play_url"]
+                break
+        content = j.get("content") or ""
+        return FeedItem(
+            kind="zvideo",
+            rid=str(zid),
+            title=j.get("title") or j.get("excerpt_title") or "",
+            author=(j.get("author") or {}).get("name") or "",
+            excerpt=(j.get("excerpt") or "")[:200],
+            votes=int(j.get("play_count") or 0),
+            comments=int(j.get("comment_count") or 0),
+            created=int(j.get("created_time") or 0),
+            url=f"{BASE}/zvideo/{zid}",
+            content=content,
+            images=[thumb] if thumb else [],
+            thumb=thumb,
+            video_url=play,
+        )
+
+    # ------------------------------------------------------------------
+    # search (Ctrl+S)
+    # ------------------------------------------------------------------
+
+    def search(self, query: str, offset: int = 0, limit: int = 20):
+        """Search zhihu (general: answers/questions/articles/zhuanlan).
+
+        Returns (items, is_end, next_offset).  ``query`` is re-quoted on
+        every call so both the initial page and follow-up pages work.
+        """
+        r = self.s.get(
+            f"{BASE}/api/v4/search_v3",
+            params={
+                "t": "general",
+                "q": query,
+                "correction": "1",
+                "offset": offset,
+                "limit": limit,
+                "filter_fields": "",
+            },
+            timeout=15,
+        )
+        if r.status_code in (401, 403):
+            raise NotLoggedIn("登录已过期，请重新登录：zhihu --login")
+        r.raise_for_status()
+        j = r.json()
+        items: list[FeedItem] = []
+        seen: set[str] = set()
+        for raw in j.get("data", []):
+            obj = raw.get("object") or raw
+            item = normalize_item(obj)
+            if not item:
+                continue
+            key = item.url or item.rid
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(item)
+        paging = j.get("paging") or {}
+        is_end = bool(paging.get("is_end")) or not items
+        return items, is_end, offset + len(items)
+
     def fetch_image_bytes(self, url: str, timeout: int = 30) -> bytes:
         data = _image_cache_get(url)
         if data is not None:
@@ -406,6 +622,19 @@ class ZhihuSession:
         )
         r.raise_for_status()
         data = r.content
+        head = data.lstrip()[:2048].lower()
+        if b"<svg" in head:
+            try:
+                converted = subprocess.run(
+                    ["convert", "svg:-", "png:-"], input=data,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    check=True, timeout=20,
+                ).stdout
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise ZhihuError(f"SVG 转 PNG 失败：{exc}") from exc
+            if not converted:
+                raise ZhihuError("SVG 转 PNG 失败：转换结果为空")
+            data = converted
         _image_cache_put(url, data)
         return data
 
@@ -484,12 +713,14 @@ class ZhihuSession:
     @staticmethod
     def _normalize_comment(raw: dict) -> Comment:
         author = (raw.get("author") or {}).get("name") or ""
+        reply_to = (raw.get("reply_to_author") or {}).get("name") or ""
         return Comment(
             id=str(raw.get("id") or ""),
             author=author,
             content=strip_html(raw.get("content") or "").strip()[:500],
             votes=int(raw.get("vote_count") or 0),
             created=int(raw.get("created_time") or 0),
+            reply_to=reply_to,
         )
 
 

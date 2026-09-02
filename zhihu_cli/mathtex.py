@@ -20,6 +20,8 @@ import shutil
 import subprocess
 from functools import lru_cache
 
+from rich.cells import cell_len
+
 # --------------------------------------------------------------------------
 # unicode maps
 # --------------------------------------------------------------------------
@@ -188,16 +190,26 @@ def utftex_render(latex: str) -> str | None:
             lines.pop()
         if not lines:
             return None
+        # Textual centers every visual line independently. utftex's output is
+        # one piece of fixed-width Unicode art, so differing line widths make
+        # braces, fraction bars and case rows drift apart when centered. Pad
+        # every row to the same terminal-cell width to center the block as a
+        # whole while preserving utftex's internal alignment.
+        if len(lines) > 1:
+            width = max(cell_len(ln) for ln in lines)
+            lines = [ln + " " * (width - cell_len(ln)) for ln in lines]
         return "\n".join(lines)
     except Exception:
         return None
 
 
 def render_math(latex: str, inline: bool) -> str:
-    """Render a LaTeX formula. Prefers utftex output.
+    """Render a LaTeX formula. utftex CLI is authoritative when installed.
 
-    Inline formulas must stay single-line (they live inside a paragraph),
-    so multi-line utftex output falls back to the flat unicode converter.
+    When utftex is missing or fails, the built-in ``mathtex`` unicode
+    converter is used as a silent fallback.  Inline formulas must stay
+    single-line (they live inside a paragraph), so multi-line utftex
+    output also falls back to the flat converter.
     """
     out = utftex_render(latex)
     if out is not None and not (inline and "\n" in out):

@@ -91,6 +91,15 @@ def main() -> int:
     scale = 1.0
     pan_x = 0.0
     pan_y = 0.0
+    # display methods: 1=unicode placeholder, 2=temporary a=T, 3=pinned a=p,
+    # 4=centered a=c.  Test on the target terminal and tell us which shows.
+    method = 1
+    METHODS = [
+        "1 占位符 (a=t,U=1 + a=p,U=1 + U+10EEEE)",
+        "2 临时 (a=T 传输并显示)",
+        "3 固定 (a=t + a=p 光标处)",
+        "4 居中 (a=t + a=c)",
+    ]
 
     old = termios.tcgetattr(0)
     try:
@@ -126,28 +135,45 @@ def main() -> int:
             z = max(0.4, scale)
             disp_w = max(1, min(vw, int(iw * fit * z)))
             disp_h = max(1, min(vh, int(ih * fit * z)))
+            cols = max(1, disp_w // cw)
+            rows = max(1, disp_h // ch)
+            disp_w = cols * cw
+            disp_h = rows * ch
             src_w = max(1.0, min(iw, disp_w / (fit * z)))
             src_h = max(1.0, min(ih, disp_h / (fit * z)))
             sx = min(max(0.0, iw - src_w), max(0.0, pan_x))
             sy = min(max(0.0, ih - src_h), max(0.0, pan_y))
-            cols = max(1, disp_w // cw)
-            rows = max(1, disp_h // ch)
             crop = im.crop((int(sx), int(sy), int(sx + src_w), int(sy + src_h)))
             resized = crop.resize((disp_w, disp_h), PILImage.LANCZOS)
             rgba = resized.convert("RGBA").tobytes()
-            if diag:
-                # q=1 so Ghostty responds on success AND failure
-                seq = kitty.transmit_rgba(rgba, img_id, disp_w, disp_h)
-                seq = seq.replace("q=2,a=T", "q=1,a=T", 1)
-                write(seq)
-                resp = read_response()
-                status.append(f"传输响应: {resp}" if resp else "传输响应: (无)")
-            else:
-                write(kitty.transmit_rgba(rgba, img_id, disp_w, disp_h))
             tcols, trows = shutil.get_terminal_size()
             row = max(1, (trows - rows) // 2)
             col = max(0, (tcols - cols) // 2)
-            write(f"\x1b[{row + 1};{col + 1}H" + kitty.placeholder_cells(img_id, cols, rows))
+            pos = f"\x1b[{row + 1};{col + 1}H"
+
+            def send(seq: str, tag: str) -> None:
+                if diag:
+                    seq = seq.replace(f"q=2,{tag}", f"q=1,{tag}", 1)
+                    write(seq)
+                    resp = read_response()
+                    status.append(f"方法{method} 传输响应: {resp}" if resp else "传输响应: (无)")
+                else:
+                    write(seq)
+
+            if method == 1:
+                send(kitty.transmit_rgba(rgba, img_id, disp_w, disp_h), "a=t")
+                write(kitty.virtual_placement(img_id, cols, rows))
+                write(pos + kitty.placeholder_cells(img_id, cols, rows))
+            elif method == 2:
+                # a=T places the image at the cursor when the last chunk lands
+                write(pos)
+                send(kitty.transmit_rgba(rgba, img_id, disp_w, disp_h, display=True), "a=T")
+            elif method == 3:
+                write(kitty.transmit_rgba(rgba, img_id, disp_w, disp_h))
+                write(pos + kitty.display_pinned(img_id))
+            elif method == 4:
+                write(kitty.transmit_rgba(rgba, img_id, disp_w, disp_h))
+                write(kitty.display_centered(img_id))
 
         def cleanup() -> None:
             try:
@@ -157,9 +183,10 @@ def main() -> int:
 
         write("\x1b[2J\x1b[H")
         emit()
-        hint = f" 图片演示: 缩放 1.00x  ({desc})  + / - 缩放  hjkl 平移  q 退出"
+        hint = (f" 图片演示 · 方法 {method}/{len(METHODS)}: {METHODS[method-1].split(' ',1)[1]}"
+                f"  · 缩放 {scale:.2f}x  m 切方法  + / - 缩放  hjkl 平移  q 退出")
         if status:
-            hint += "  " + status[0]
+            hint += "  " + status[-1]
         print("\x1b[1;1H\x1b[K" + hint, end="", flush=True)
 
         while True:
@@ -169,7 +196,13 @@ def main() -> int:
             s = buf_in.decode("utf-8", "ignore")
             if s in ("q", "Q", "\x1b"):
                 break
-            if s in ("+", "="):
+            if s in ("m", "M"):
+                method = method % len(METHODS) + 1
+                emit()
+            elif s in ("1", "2", "3", "4"):
+                method = int(s)
+                emit()
+            elif s in ("+", "="):
                 scale = min(8.0, scale * 1.5)
                 emit()
             elif s == "-":
@@ -196,9 +229,10 @@ def main() -> int:
                 webbrowser.open(arg)
                 print(f"已在浏览器打开: {arg}")
                 return 0
-            hint = f" 图片演示: 缩放 {scale:.2f}x  ({desc})  q 退出"
+            hint = (f" 图片演示 · 方法 {method}/{len(METHODS)}: {METHODS[method-1].split(' ',1)[1]}"
+                    f"  · 缩放 {scale:.2f}x  m 切方法  + / - 缩放  hjkl 平移  q 退出")
             if status:
-                hint += "  " + status[0]
+                hint += "  " + status[-1]
             print("\x1b[1;1H\x1b[K" + hint, end="", flush=True)
     except KeyboardInterrupt:
         pass

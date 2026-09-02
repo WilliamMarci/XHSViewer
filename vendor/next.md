@@ -1,7 +1,7 @@
 # 工作进度与交接说明（next.md）
 
-> 交接时间：2026-09-02。主程序功能基本完成；**唯一未解决的核心问题：
-> 图片在 Ghostty 1.3.1 中无法显示**（见下方「当前阻塞问题」）。
+> 交接时间：2026-09-02。主程序功能基本完成；图片显示问题已定位根因并修复
+> （见下方「图片无法显示：已定位根因并修复」），请在真机 Ghostty 复核。
 
 ## 已完成功能（均已提交 git）
 
@@ -41,47 +41,55 @@
 7. **space 键崩溃**：`scroll_page_down(immediate=...)` 参数不存在。
    改为 `scroll_to(y+viewport, immediate=True)`。
 
-## 当前阻塞问题：图片无法在 Ghostty 显示（最重要）
+## 图片问题的旧诊断记录（已修复，留档备查）
 
-### 现象
-- 用户 Ghostty 1.3.1（Linux/GTK）：`demo_image.py` 中占位符字符
-  （U+10EEEE + diacritic）**显示为普通字符**，图片未渲染。
-- 之前的 `a=T`+`a=p`（pinned placement）方案：完全无显示。
+- 现象：Ghostty 1.3.1 中占位符（U+10EEEE + diacritic）显示为普通字符。
+- 之前已做：对照 yazi `kgp.rs` 与 Ghostty `graphics_*.zig`，确认传输格式
+  `q=2,a=T,C=1,U=1,f=32,s=W,v=H,i=ID,m=1`；校验 ID 与前景色一致；新增
+  `demo_image.py --diag`（q=1 读终端响应）。
+- 诊断手段（真机复核时仍可用）：
+  - `python demo_image.py --diag logo.png`：`OK` → 图片已存储，
+    问题在占位符关联；错误码（`EINVAL`/`EDATA`/`ENOENT`）→ 传输格式。
+  - `ghostty --debug` 或 journalctl 看 "missing image for virtual placement"。
+- 最终根因与修复见下方「图片无法显示：已定位根因并修复」。
 
-### 已做工作
-1. 对照 yazi（`yazi-adapter/src/drivers/kgp.rs`）与 Ghostty 源码
-   （`src/terminal/kitty/graphics_*.zig`）确认方案：
-   - 传输：`q=2,a=T,C=1,U=1,f=32,s=W,v=H,i=ID,m=1;`（zlib RGBA 原始像素），
-     后续分块仅 `m=` 参数
-   - 显示：每格写入 `U+10EEEE` + 行 diacritic + 列 diacritic，
-     前景色（24bit truecolor）= 图片 ID 低 24 位
-   - Ghostty 解码链路已验证：`colorToId(fg) → imageById → 虚拟 placement`
-     （`IncompletePlacement.init` / `prepKittyVirtualPlacement`）
-2. 修复 demo 行对齐（`\r\n`）与状态栏抹掉首行的问题
-3. 传输 ID 与前景色 ID 一致（校验 9182=9182）
-4. 新增 `demo_image.py --diag`：以 `q=1` 传输并**读取显示终端的协议响应**
-   （成功返回 `Gi=<id>;OK`，失败返回错误码），用于定位是「传输失败」
-   还是「占位符关联失败」
+## 图片无法显示：已定位根因并修复（对照 Ghostty 源码）
 
-### 下一步（按优先级）
-1. **在用户 Ghostty 运行**：`python demo_image.py --diag logo.png`
-   - 若显示 `OK` → 图片已存储，问题在占位符关联/渲染；
-     继续对照 Ghostty `placementIterator` 与 `page.zig` 的
-     `kitty_virtual_placeholder` 行标记
-   - 若显示错误码（如 `EINVAL`/`EDATA`/`ENOENT`）→ 传输格式问题，按错误码修
-2. 对照验证：在用户机器跑 `yazi` 图片预览，确认其是否正常；
-   正常则逐字节 diff 我方序列与 yazi 输出（可加 `--dump` 保存原始字节）
-3. 若 Ghostty unicode placeholder 有版本缺陷：备选
-   - 用 `t=d` 直接文件路径 / `t=f` 临时文件媒体（需终端允许）
-   - 回退到 ratatui-image 的 halfcell（半块字符）降级方案
-   - 或调用外部 `chafa`（Kitty/符号输出）
+### 根因（2026-09-02 对照 Ghostty 源码逐字节确认）
 
-### 注意
-- 测试环境无 Ghostty，只能通过 pty 模拟；pty 中占位符/传输均可验证字节正确，
-  但无法验证 Ghostty 渲染。
-- `TERM=xterm-ghostty`，`TERM_PROGRAM=ghostty`。
-- Ghostty 日志（渲染警告如 "missing image for virtual placement"）：
-  Linux 下 `ghostty --debug` 或 journalctl，可辅助定位。
+1. **zlib 载荷没有声明压缩方式（最终阻断显示的 bug）**：
+   `transmit_rgba` 对 RGBA 执行了 `zlib.compress()`，但控制数据中漏掉 `o=z`。
+   Ghostty 因而把压缩流当作未压缩 RGBA 读取，载荷长度和像素格式不匹配；同时
+   `q=2` 静默了错误响应，使问题被误判为 placement 关联失败。修复：所有压缩的
+   `a=t` / `a=T` 首块均添加 `o=z`。
+   真机 Ghostty 1.3.1 运行 `demo_image.py` 后已确认图片成功显示。
+2. **单元格尺寸查询命令错误**：原实现发送裸 Kitty APC `q=2`，这不是尺寸查询，
+   Ghostty 会报告 `EINVAL: dimensions required`。已改为标准 `CSI 16 t`，解析
+   `CSI 6;height;width t` 响应。
+3. **缺少 virtual placement 注册**：
+   Ghostty/kitty 的 unicode placeholder 方案要求「先 `a=t,U=1` 传输图片，再
+   `a=p,U=1,i=..,c=..,r=..` 注册网格」，之后写入 `U+10EEEE`+变音符 才渲染。
+   旧代码用 `a=T,U=1`（无 c/r）依赖终端自动推算网格；Ghostty 1.3.x 该路径
+   不稳定 → `grid()` 返回 `PlacementMissingPlacement` → 占位符当普通字符显示。
+   修复：`transmit_rgba` 改为 `a=t,U=1`，新增 `kitty.virtual_placement(id,cols,rows)`
+   （`a=p,U=1,i,c,r`），TUI 与 demo 在传输后、写占位符前调用。
+4. **DIACRITICS 表与终端不一致**：旧表 314 项，且从 index 62 起错位
+   （混入 0x618/0x619/0x61a/0x65f…；`\u10a0f` 等 5 位十六进制被 Python `\u`
+   截断成错误字符）。终端用自己那张 297 项表反查 index，错位→行/列映射全错。
+   已按 Ghostty `graphics_unicode.zig` 的 297 项表完全重写，并逐项比对一致。
+5. **像素尺寸与网格错位（缩放导致）**：旧代码先算 `disp_w/disp_h` 再 `//cw`
+   取网格，缩放后两张尺寸对不上 → Ghostty 按自身逻辑再缩放/加黑边。
+   修复：先取 `cols/rows`，再令 `disp_w=cols*cw, disp_h=rows*ch`，1:1 映射。
+6. **Nerd Font 图标码点错误**：`\uf0437` 等 5 位十六进制同样被 `\u` 截断，
+   且 v2 旧码点在 Nerd Font v3 已重分配。已改用 v3 码点（`\U000f02e9` 等），
+   并用本机字体 cmap 逐项验证存在。
+
+### 验证
+- `.venv/bin/python -m pyflakes zhihu_cli/*.py demo_image.py` 通过
+- headless `app.run_test` 冒烟：ContentScreen/评论区/图片按钮/选择模式 均可
+- `DIACRITICS` 与 Ghostty 297 项表 `==` 比对通过
+- 请在真机 Ghostty 再跑：`.venv/bin/python demo_image.py`（应能看到图片；
+  `--diag` 仍可看传输响应码）
 
 ## 其他待办 / 可优化项
 
