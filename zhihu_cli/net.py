@@ -502,23 +502,26 @@ class ZhihuSession:
         return item
 
     def _fetch_question(self, qid: str) -> FeedItem:
-        r = self.s.get(f"{BASE}/api/v4/questions/{qid}", timeout=15)
-        if r.status_code in (401, 403):
-            raise NotLoggedIn("登录已过期，请重新登录：zhihu --login")
-        r.raise_for_status()
-        j = r.json()
+        # `/api/v4/questions/{qid}` rejects without extra params (code 10003,
+        # "请求参数异常") even when logged in. Derive the question info from
+        # the answers endpoint instead (which is reliable): the answer items
+        # carry the question title.
         item = FeedItem(
             kind="question",
             rid=str(qid),
-            title=j.get("title") or "",
-            author=(j.get("author") or {}).get("name") or "",
-            excerpt=j.get("detail") or "",
-            votes=int(j.get("voteup_count") or 0),
-            comments=int(j.get("comment_count") or 0),
-            created=int(j.get("created_time") or 0),
             url=f"{BASE}/question/{qid}",
             qid=str(qid),
         )
+        try:
+            answers, _ = self.question_answers(str(qid), 0, limit=1)
+            if answers:
+                first = answers[0]
+                item.title = first.title or ""
+                item.author = first.author
+                item.excerpt = first.excerpt
+                item.comments = first.comments
+        except Exception:
+            pass
         return item
 
     def _fetch_article(self, pid: str) -> FeedItem:
