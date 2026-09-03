@@ -8,12 +8,15 @@ from __future__ import annotations
 from .constants import (
     BADGE_COLOR,
     CUSTOM_THEMES,
+    ICON_CANCEL,
     ICON_COMMENT,
     ICON_COPY,
     ICON_IMAGE,
     ICON_IMAGES,
     ICON_LINK,
+    ICON_OPEN,
     ICON_PLAY,
+    ICON_SEARCH,
 )
 from .widgets import (
     AnswerHeader,
@@ -59,7 +62,10 @@ __all__ = [
     "ICON_IMAGE",
     "ICON_IMAGES",
     "ICON_LINK",
+    "ICON_OPEN",
     "ICON_PLAY",
+    "ICON_SEARCH",
+    "ICON_CANCEL",
     "ZhihuApp",
     "FeedScreen",
     "SearchScreen",

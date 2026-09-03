@@ -44,7 +44,7 @@ class ContentScreen(Screen):
         Binding("k,up", "cursor_up", "", show=False),
         Binding("h,left", "cursor_left", "", show=False),
         Binding("l,right", "cursor_right", "", show=False),
-        Binding("space", "page_down", "下翻页", show=False),
+        Binding("space", "cursor_activate", "打开", show=False),
         Binding("enter", "cursor_activate", "打开", show=False),
         Binding("n", "next_answer", "下一个回答"),
         Binding("N", "prev_answer", "上一个回答"),
@@ -72,7 +72,7 @@ class ContentScreen(Screen):
         self._ans_switching: bool = False
 
     def compose(self) -> ComposeResult:
-        yield AnswerTopBar(self.item.badge)
+        yield AnswerTopBar(f"展开 · {self.item.badge}")
         yield AnswerHeader(id="answer-header")
         yield ContentScroll(id="content")
         yield PageSearchBar(id="page-search")
@@ -519,8 +519,8 @@ class ContentScreen(Screen):
             self._focus_target(1)
 
     def action_cursor_activate(self):
-        if not self._cursor_mode:
-            return
+        """Enter/Space: activate the focused actionable widget (open image,
+        collapse image, open link, press a button) — works in any mode."""
         w = self.app.focused
         if w is None:
             return

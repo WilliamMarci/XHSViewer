@@ -21,7 +21,6 @@ class CommentsScreen(ModalScreen[None]):
         Binding("escape,q", "close", "关闭"),
         Binding("j,down", "scroll_down", "", show=False),
         Binding("k,up", "scroll_up", "", show=False),
-        Binding("space", "page_down", "", show=False),
     ]
 
     def __init__(self, client: ZhihuSession, item: FeedItem):
@@ -40,7 +39,6 @@ class CommentsScreen(ModalScreen[None]):
                     f" {ICON_COMMENT} · {self.item.author or '匿名用户'}{('（' + count + '）') if count else ''}",
                     classes="cmt-head",
                 ),
-                Static("", classes="cmt-spacer"),
                 Button(" 返回 ", id="comments-close", classes="cmt-close"),
                 id="cmt-title-row",
             ),

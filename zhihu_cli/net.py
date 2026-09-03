@@ -143,7 +143,11 @@ def fmt_time(ts: int | None) -> str:
         return f"{int(d / 3600)}小时前"
     if d < 86400 * 7:
         return f"{int(d / 86400)}天前"
-    return time.strftime("%m-%d", time.localtime(ts))
+    lt = time.localtime(ts)
+    # 不是当年时标记年份，避免歧义
+    if lt.tm_year != time.localtime().tm_year:
+        return time.strftime("%Y-%m-%d", lt)
+    return time.strftime("%m-%d", lt)
 
 
 # --------------------------------------------------------------------------

@@ -10,6 +10,8 @@ from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
 
+from .constants import ICON_CANCEL, ICON_OPEN
+
 
 class SearchPromptScreen(ModalScreen[str]):
     """Modal input: search answers/questions (Ctrl+S)."""
@@ -17,15 +19,15 @@ class SearchPromptScreen(ModalScreen[str]):
     BINDINGS = [Binding("escape", "cancel", "取消")]
 
     def compose(self) -> ComposeResult:
-        yield Vertical(
-            Static(" 搜索知乎：输入关键词后按 Enter", classes="cmt-title"),
-            Input(placeholder="搜索问题 / 回答 / 文章…", id="search-input"),
-            Horizontal(
-                Button(" 搜索 ", id="search-go", classes="modebtn"),
-                Button(" 取消 ", id="search-cancel", classes="modebtn"),
-                classes="row",
+        yield Horizontal(
+            Input(
+                placeholder="搜索问题 / 回答 / 文章…",
+                id="search-input",
+                classes="prompt-input",
             ),
-            id="url-panel",
+            Button(ICON_OPEN, id="search-go", classes="prompt-btn prompt-go"),
+            Button(ICON_CANCEL, id="search-cancel", classes="prompt-btn prompt-cancel"),
+            id="prompt-panel",
         )
 
     def on_mount(self):
@@ -130,18 +132,15 @@ class UrlPromptScreen(ModalScreen[str]):
     BINDINGS = [Binding("escape", "cancel", "取消")]
 
     def compose(self) -> ComposeResult:
-        yield Vertical(
-            Static(" 打开链接：粘贴知乎链接后按 Enter 或点「打开」", classes="cmt-title"),
+        yield Horizontal(
             Input(
                 placeholder="https://www.zhihu.com/question/123/answer/456",
                 id="url-input",
+                classes="prompt-input",
             ),
-            Horizontal(
-                Button(" 打开 ", id="url-go", classes="modebtn"),
-                Button(" 取消 ", id="url-cancel", classes="modebtn"),
-                classes="row",
-            ),
-            id="url-panel",
+            Button(ICON_OPEN, id="url-go", classes="prompt-btn prompt-go"),
+            Button(ICON_CANCEL, id="url-cancel", classes="prompt-btn prompt-cancel"),
+            id="prompt-panel",
         )
 
     def on_mount(self):

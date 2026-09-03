@@ -333,12 +333,13 @@ AnswerHeader {
 .img-inline {
     width: auto;
     height: auto;
+    margin: 0 0 0 2;
 }
 
 .img-caption {
     width: 100%;
     height: auto;
-    margin: 0 1;
+    margin: 0 1 0 2;
     text-align: left;
     color: $text-muted;
 }
@@ -348,7 +349,7 @@ AnswerHeader {
     border: none;
     min-width: 0;
     padding: 0 2;
-    margin: 0 1;
+    margin: 0 1 0 2;
     text-align: left;
     content-align: left middle;
 }
@@ -382,7 +383,7 @@ AnswerHeader {
     height: 1;
     border: none;
     padding: 0 2;
-    margin: 0 1;
+    margin: 0 1 0 2;
     color: $text-muted;
 }
 
@@ -440,14 +441,14 @@ AnswerHeader {
     background: $panel;
     color: $text;
     padding: 0 2;
-    margin: 0;
+    margin: 0 0 0 1;
     width: 100%;
 }
 
 /* code block header row: language label + right-aligned copy button */
 .code-head {
     height: 1;
-    margin: 0;
+    margin: 0 0 0 1;
     width: 100%;
 }
 
@@ -481,8 +482,14 @@ AnswerHeader {
     background: $primary-background;
     border-left: thick $accent;
     padding: 0 2;
-    margin: 0;
+    margin: 0 0 0 1;
     width: 100%;
+}
+
+/* 正文段落：内容区本身 0 边距（横线贯通到最左最右），文字距内容区左右各 2 字符；
+   引用块（.quoteblock 类，更高优先级）保持整块通栏 */
+ClickableText {
+    margin: 0 2;
 }
 
 /* cursor-mode highlight on link-bearing paragraphs */
@@ -518,14 +525,12 @@ ClickableText:focus {
     background: $panel;
 }
 
+/* title is the flexible element so the close button stays on-screen */
 .cmt-head {
+    width: 1fr;
     height: 1;
     padding: 0 1;
     text-style: bold;
-}
-
-.cmt-spacer {
-    width: 1fr;
 }
 
 .cmt-close {
@@ -547,36 +552,73 @@ ClickableText:focus {
     margin-top: 1;
 }
 
-/* url prompt (Ctrl+O) */
-#url-panel {
+/* URL / search prompt: a compact theme-native panel.  A single container
+   avoids nested 100% widths overflowing through the right border. */
+#prompt-panel {
     width: 72;
     max-width: 90%;
-    height: auto;
+    height: 3;
+    background: $surface;
+    border: round $border;
+    padding: 0 1;
+    margin-top: 2;
+}
+
+.prompt-input {
+    width: 1fr;
+    min-width: 0;
+    height: 1;
+    min-height: 1;
+    padding: 0 1;
+    border: none;
     background: $panel;
-    border: round $accent;
-    padding: 1 1;
+    color: $text;
+}
+
+.prompt-input:focus {
+    border: none;
+    background: $panel;
+    color: $text;
+}
+
+.prompt-btn {
+    width: 4;
+    height: 1;
+    min-width: 0;
+    border: none;
+    padding: 0;
+    color: $text;
+    background: $primary;
+    content-align: center middle;
+}
+
+.prompt-go {
+    background: $primary;
+    color: $text;
+}
+
+.prompt-go:hover,
+.prompt-go:focus {
+    background: $primary-lighten-1;
+}
+
+.prompt-cancel {
+    background: $primary;
+    color: $text;
+}
+
+.prompt-cancel:hover,
+.prompt-cancel:focus {
+    background: $error;
+    color: $text;
 }
 
 SearchPromptScreen,
 UrlPromptScreen {
     align: center top;
-    padding-top: 1;
-}
-
-.modebtn {
-    width: auto;
-    min-width: 0;
-    height: 1;
-    border: none;
-    padding: 0 2;
-    margin: 0 1 0 0;
-}
-
-#url-input {
-    margin: 1 1;
-    border: solid $border;
-    background: $background;
-    color: $text;
+    padding: 0;
+    overflow: hidden;
+    background: $background 65%;
 }
 
 .comment {

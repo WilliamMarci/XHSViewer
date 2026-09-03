@@ -13,6 +13,7 @@ from textual.widgets import Button, Static
 from .. import config, history
 from ..net import NotLoggedIn, ZhihuSession
 from .widgets import (
+    AnswerTopBar,
     BottomBar,
     Card,
     FeedScroll,
@@ -20,7 +21,6 @@ from .widgets import (
     HistoryAnswerRow,
     HistoryEndRule,
     HistoryEntry,
-    TopBar,
     push_item_screen,
 )
 
@@ -32,6 +32,7 @@ class FeedScreen(Screen):
         Binding("j,down", "next_card", "下一条", show=False),
         Binding("k,up", "prev_card", "上一条", show=False),
         Binding("enter", "open_card", "展开"),
+        Binding("space", "open_card", "", show=False),
         Binding("r", "refresh", "刷新"),
         Binding("o", "open_browser", "浏览器"),
         Binding("g", "go_top", "顶部", show=False),
@@ -313,6 +314,7 @@ class SearchScreen(Screen):
         Binding("j,down", "next_card", "下一条", show=False),
         Binding("k,up", "prev_card", "上一条", show=False),
         Binding("enter", "open_card", "展开"),
+        Binding("space", "open_card", "", show=False),
         Binding("r", "refresh", "刷新"),
         Binding("o", "open_browser", "浏览器"),
         Binding("g", "go_top", "顶部", show=False),
@@ -331,9 +333,13 @@ class SearchScreen(Screen):
         self.focus_index = 0
 
     def compose(self) -> ComposeResult:
-        yield TopBar(f"搜索 · {self._query}")
+        yield AnswerTopBar(f"搜索 · {self._query}")
         yield FeedScroll(id="feed")
         yield BottomBar(id="bottombar")
+
+    @on(Button.Pressed, "#answer-back")
+    def _search_back_button(self, event: Button.Pressed):
+        self.action_back()
 
     def on_mount(self):
         self.run_worker(

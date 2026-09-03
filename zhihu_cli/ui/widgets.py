@@ -100,14 +100,14 @@ class TopBar(Static):
 class AnswerTopBar(Horizontal):
     """Answer header chrome with a left-aligned back button."""
 
-    def __init__(self, badge: str, detail_toggle: bool = False):
+    def __init__(self, title: str, detail_toggle: bool = False):
         super().__init__(classes="answer-topbar")
-        self.badge = badge
+        self.title = title
         self.detail_toggle = detail_toggle
 
     def compose(self) -> ComposeResult:
         yield Button(" 返回 ", id="answer-back")
-        yield Static(f"展开 · {self.badge}", classes="answer-topbar-title")
+        yield Static(self.title, classes="answer-topbar-title")
         if self.detail_toggle:
             # trailing-end toggle: ▼ 展开问题详情 / ▲ 收起
             yield Button(" ▼ ", id="question-detail-toggle", classes="answer-topbar-toggle")

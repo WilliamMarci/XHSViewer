@@ -10,6 +10,10 @@ ICON_LINK = "\U000f0337"   # nf-md-link (v3)
 ICON_PLAY = "\U000f040a"   # nf-md-play (v3)
 ICON_COMMENT = "\U000f017a"  # nf-md-comment (v3)
 ICON_COPY = "\U0001f5ce"     # 🗎 copy (U+1F5CE)
+# 🔍︎ search (U+1F50D + U+FE0E 文本变体，纯色放大镜)
+ICON_SEARCH = "\U0001f50d\ufe0e"
+ICON_OPEN = "\u23ce"         # ⏎ 回车/换行（打开）
+ICON_CANCEL = "\u00d7"       # × 取消
 
 BADGE_COLOR = {
     "回答": "#3b82f6",
