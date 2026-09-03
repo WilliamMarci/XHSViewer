@@ -1,6 +1,7 @@
 """Reusable widgets and helpers (top bars, cards, bottom bar, scroll areas)."""
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import shutil
@@ -82,6 +83,37 @@ def push_item_screen(app: App, client: ZhihuSession, item: FeedItem) -> None:
         app.push_screen(QuestionScreen(client, item))
     else:
         app.push_screen(ContentScreen(client, item))
+
+
+# 知乎站内链接（问题/回答/文章）；share code 等后缀不影响匹配。
+# 视频（zvideo）除外：TUI 无法播放，走浏览器。
+_ZHIHU_LINK_RE = re.compile(
+    r"https?://(?:www\.)?zhihu\.com/"
+    r"(?:question/\d+(?:/answer/\d+)?|p/\d+|article/\d+)"
+    r"|https?://zhuanlan\.zhihu\.com/p/\d+"
+)
+
+
+def _open_zhihu_inline(app: App, client: ZhihuSession, url: str) -> None:
+    """Fetch a zhihu-internal link and open it inline (in-app)."""
+
+    async def _work():
+        try:
+            item = await asyncio.to_thread(client.fetch_url, url)
+        except Exception as e:
+            app.notify(f"链接打开失败：{e}", severity="error", timeout=6)
+            return
+        push_item_screen(app, client, item)
+
+    app.run_worker(_work(), name="open-link", group="link", exclusive=True)
+
+
+def open_link(app: App, client: ZhihuSession, url: str) -> None:
+    """Open a content link: zhihu-internal ones inline, others in browser."""
+    if _ZHIHU_LINK_RE.match((url or "").strip()):
+        _open_zhihu_inline(app, client, url)
+    else:
+        webbrowser.open(url)
 
 
 class TopBar(Static):
@@ -759,13 +791,13 @@ class ClickableText(Static, can_focus=True):
             return
         url = self._url_at(event.x, event.y)
         if url:
-            webbrowser.open(url)
+            open_link(self.app, self.app.client, url)
             event.stop()
 
     def activate(self):
         """Cursor-mode activation: open the first link in this block."""
         if self._links:
-            webbrowser.open(self._links[0][2])
+            open_link(self.app, self.app.client, self._links[0][2])
 
 
 class LinkButton(Button):

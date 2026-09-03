@@ -34,6 +34,7 @@ from .widgets import (
     _find_in_widgets,
     _open_page_search,
     open_image_with_system,
+    open_link,
 )
 
 
@@ -265,7 +266,7 @@ class ContentScreen(Screen):
         btn = event.button
         url = getattr(btn, "url", "")
         if url:
-            webbrowser.open(url)
+            open_link(self.app, self.client, url)
 
     @on(Button.Pressed, ".tablebtn")
     def _open_table(self, event: Button.Pressed):
