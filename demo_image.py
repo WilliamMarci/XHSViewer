@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from zhihu_cli import kitty  # noqa: E402
+from xhs_cli import kitty  # noqa: E402
 
 
 def load_image(arg: str | None) -> tuple[bytes, str]:
@@ -50,7 +50,7 @@ def load_image(arg: str | None) -> tuple[bytes, str]:
                     [(0, y0 + y), (799, y0 + y)],
                     fill=tuple(int(a + (b - a) * t) for a, b in zip(c1, c2)),
                 )
-        draw.text((20, 30), "Zhihu Viewer 图片演示", fill="white")
+        draw.text((20, 30), "XHS Viewer 图片演示", fill="white")
         draw.text((20, 60), "+ / - 缩放   hjkl 平移   q 退出", fill=(200, 200, 200))
         buf = io.BytesIO()
         im.save(buf, "PNG")
@@ -58,7 +58,7 @@ def load_image(arg: str | None) -> tuple[bytes, str]:
     if arg.startswith(("http://", "https://")):
         import requests
 
-        r = requests.get(arg, timeout=20, headers={"Referer": "https://www.zhihu.com/"})
+        r = requests.get(arg, timeout=20, headers={"Referer": "https://www.xiaohongshu.com/"})
         r.raise_for_status()
         return r.content, arg
     return Path(arg).read_bytes(), arg

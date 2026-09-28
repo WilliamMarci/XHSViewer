@@ -1,4 +1,4 @@
-"""User configuration (JSON in ~/.config/zhihu-viewer/config.json)."""
+"""User configuration (JSON in ~/.config/xhs-viewer/config.json)."""
 from __future__ import annotations
 
 import json
@@ -8,31 +8,38 @@ from pathlib import Path
 
 CONFIG_DIR = Path(
     os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")
-) / "zhihu-viewer"
+) / "xhs-viewer"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULTS = {
-    # 知乎行间公式渲染出的 SVG 图片无法在终端展示，默认隐藏（公式仍以
-    # 文本/utftex 形式渲染）；设为 true 时将其作为普通图片展示
-    "show_math_svg": False,
-    "expand_images_by_default": False,
+    # 进入笔记后自动内嵌显示图库第一张图片（图片社区默认打开即看图）
+    "expand_images_by_default": True,
+    # 列表模式下卡片内显示 3:4 封面图（需要终端支持 Kitty 图片协议）
+    "feed_show_images": False,
+    # 卡片列表视图：list（纵向卡片）/ grid（宫格，需终端支持图片）
+    "feed_view": "list",
+    # 宫格单元格大小：small / medium / large / xlarge
+    # 列数由终端宽度和单元格大小自动决定
+    "feed_grid_cell": "xlarge",
+    # 图文笔记正文顺序：True = 图片集在前（Photo first），False = 文字在前
+    "note_photo_first": True,
     "history_enabled": True,
-    # False: /tmp/zhihuviewer/history.json; True: config directory.
+    # False: /tmp/xhsviewer/history.json; True: config directory.
     "history_persistent": False,
     "auto_refresh_recommend": False,
-    # 正文底部「尾端按钮」：browser（在浏览器中打开）/ next_answer（下一个回答）/ none（隐藏）
+    # 正文底部「尾端按钮」：browser（在浏览器中打开）/ next_note（下一条笔记）/ none（隐藏）
     "content_end_button": "browser",
-    # 缓存根目录；为空时使用系统临时目录下的 zhihuviewer（/tmp/zhihuviewer）
+    # 缓存根目录；为空时使用系统临时目录下的 xhsviewer（/tmp/xhsviewer）
     "cache_dir": "",
 }
 
 
 def cache_root() -> Path:
-    """Cache root: config ``cache_dir`` when set, else ``/tmp/zhihuviewer``."""
+    """Cache root: config ``cache_dir`` when set, else ``/tmp/xhsviewer``."""
     override = str(get("cache_dir", "") or "").strip()
     if override:
         return Path(override).expanduser()
-    return Path(tempfile.gettempdir()) / "zhihuviewer"
+    return Path(tempfile.gettempdir()) / "xhsviewer"
 
 
 def load() -> dict:

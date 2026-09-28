@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from textual.theme import Theme
 
-# 图片按钮改用 emoji（用户指定；NF 的 MDI 码点在部分终端仍显示异常）
+# 图片按钮改用 emoji（NF 的 MDI 码点在部分终端仍显示异常）
 ICON_IMAGE = "🖼"          # emoji: frame with picture
 ICON_IMAGES = "🖼"         # emoji: frame with picture
 ICON_LINK = "\U000f0337"   # nf-md-link (v3)
@@ -14,30 +14,30 @@ ICON_COPY = "\U0001f5ce"     # 🗎 copy (U+1F5CE)
 ICON_SEARCH = "\U0001f50d\ufe0e"
 ICON_OPEN = "\u23ce"         # ⏎ 回车/换行（打开）
 ICON_CANCEL = "\u00d7"       # × 取消
+ICON_LIKE = "\u2665"         # ♥ 点赞
+ICON_COLLECT = "\u2605"      # ★ 收藏
 
 BADGE_COLOR = {
-    "回答": "#3b82f6",
-    "文章": "#10b981",
-    "视频": "#f43f5e",
-    "提问": "#a78bfa",
-    "想法": "#f59e0b",
+    "图文": "#ff2442",
+    "视频": "#a855f7",
+    "笔记": "#ff2442",
 }
 
 # Theme extension point. Add Theme(...) objects here; they are registered at
 # startup and automatically appear in Textual's theme picker opened from GO.
 CUSTOM_THEMES: tuple[Theme, ...] = (
     Theme(
-        name="zhihu-dark",
-        primary="#2563eb",
-        secondary="#7c3aed",
-        accent="#38bdf8",
-        success="#16a34a",
-        warning="#eab308",
-        error="#f43f5e",
-        background="#0f1115",
-        surface="#141821",
-        panel="#171a21",
-        foreground="#e2e8f0",
+        name="xhs-red",
+        primary="#ff2442",
+        secondary="#ff6b81",
+        accent="#ff8fa3",
+        success="#34d399",
+        warning="#fbbf24",
+        error="#ef4444",
+        background="#120f12",
+        surface="#1c1519",
+        panel="#231920",
+        foreground="#f7eef1",
         dark=True,
     ),
 )

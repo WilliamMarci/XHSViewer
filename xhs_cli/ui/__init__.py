@@ -1,39 +1,37 @@
-"""Textual UI package: split by page/component.
-
-Exposes the same public names the old single-file ``ui.py`` did, so
-``from .ui import ZhihuApp`` and similar imports keep working.
-"""
+"""Textual UI package: split by page/component."""
 from __future__ import annotations
 
 from .constants import (
     BADGE_COLOR,
     CUSTOM_THEMES,
     ICON_CANCEL,
+    ICON_COLLECT,
     ICON_COMMENT,
     ICON_COPY,
     ICON_IMAGE,
     ICON_IMAGES,
+    ICON_LIKE,
     ICON_LINK,
     ICON_OPEN,
     ICON_PLAY,
     ICON_SEARCH,
 )
 from .widgets import (
-    AnswerHeader,
-    AnswerTopBar,
     BottomBar,
     Card,
     ClickableText,
-    CodeHead,
     CommentScroll,
     ContentScroll,
     FeedScroll,
     FeedTopBar,
-    HistoryAnswerRow,
+    GridCard,
     HistoryEndRule,
     HistoryEntry,
     HistoryHeading,
+    HistoryNoteRow,
     LinkButton,
+    NoteHeader,
+    NoteTopBar,
     PageSearchBar,
     StatusLine,
     TopBar,
@@ -42,50 +40,68 @@ from .widgets import (
     _open_page_search,
     _set_search_highlight,
     _truncate_cells,
+    build_card,
+    grid_column_count,
     open_image_with_system,
     push_item_screen,
     system_viewer_notice,
 )
 from .feed import FeedScreen, SearchScreen
-from .question import QuestionScreen
-from .image import ImageSection, ImageViewerScreen, ViewerHint, _placeholder_text
-from .content import ContentScreen
+from .image import (
+    GallerySection,
+    ImageSection,
+    ImageViewerScreen,
+    ThumbImage,
+    ViewerHint,
+    _placeholder_text,
+)
+from .content import ContentScreen, styled_desc
 from .comments import CommentsScreen
-from .modals import SearchPromptScreen, TableScreen, UrlPromptScreen
-from .app import ZhihuApp
+from .modals import (
+    SearchPromptScreen,
+    TableScreen,
+    UrlPromptScreen,
+    VerificationRequiredScreen,
+)
+from .app import XhsApp
 
 __all__ = [
     "BADGE_COLOR",
     "CUSTOM_THEMES",
+    "ICON_COLLECT",
     "ICON_COMMENT",
     "ICON_COPY",
     "ICON_IMAGE",
     "ICON_IMAGES",
+    "ICON_LIKE",
     "ICON_LINK",
     "ICON_OPEN",
     "ICON_PLAY",
     "ICON_SEARCH",
     "ICON_CANCEL",
-    "ZhihuApp",
+    "XhsApp",
     "FeedScreen",
     "SearchScreen",
-    "QuestionScreen",
     "ContentScreen",
     "CommentsScreen",
     "ImageViewerScreen",
+    "GallerySection",
     "ImageSection",
+    "ThumbImage",
     "ViewerHint",
     "SearchPromptScreen",
     "TableScreen",
     "UrlPromptScreen",
+    "VerificationRequiredScreen",
     "TopBar",
-    "AnswerTopBar",
+    "NoteTopBar",
     "FeedTopBar",
     "StatusLine",
     "BottomBar",
-    "AnswerHeader",
+    "NoteHeader",
     "Card",
-    "HistoryAnswerRow",
+    "GridCard",
+    "HistoryNoteRow",
     "HistoryHeading",
     "HistoryEntry",
     "HistoryEndRule",
@@ -93,9 +109,11 @@ __all__ = [
     "FeedScroll",
     "ClickableText",
     "LinkButton",
-    "CodeHead",
     "ContentScroll",
     "CommentScroll",
+    "styled_desc",
+    "build_card",
+    "grid_column_count",
     "open_image_with_system",
     "system_viewer_notice",
     "push_item_screen",

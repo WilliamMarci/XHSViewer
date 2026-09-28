@@ -1,4 +1,4 @@
-"""Entry point: python -m zhihu_cli / console script `zhihu`."""
+"""Entry point: python -m xhs_cli / console script `xhsviewer`."""
 from __future__ import annotations
 
 import argparse
@@ -44,43 +44,33 @@ def main(argv: list[str] | None = None) -> int:
     threading.excepthook = _thread_excepthook
 
     ap = argparse.ArgumentParser(
-        prog="zhihuviewer",
-        description="知乎 CLI 客户端：推荐流卡片浏览 + 终端内图片查看（Kitty 协议，支持 Ghostty）",
+        prog="xhsviewer",
+        description="小红书 CLI 客户端：推荐流卡片浏览 + 终端内图片查看（Kitty 协议，支持 Ghostty）",
     )
-    ap.add_argument("--login", action="store_true", help="强制重新登录")
-    ap.add_argument("--cookies", help="直接提供 Cookie 字符串（形如 d_c0=xxx; z_c0=yyy）")
-    ap.add_argument("url", nargs="?", help="直接打开某个知乎链接（question/answer/zhuanlan/zvideo）")
+    ap.add_argument("--login", action="store_true", help="强制重新登录（xhs login）")
+    ap.add_argument(
+        "url", nargs="?", help="直接打开小红书笔记链接（explore / discovery/item）或笔记 ID"
+    )
     args = ap.parse_args(argv)
 
     from . import kitty
-    from .net import (
-        ZhihuError,
-        ZhihuSession,
-        load_cookies,
-        login_flow,
-        parse_cookie_header,
-    )
+    from .net import XhsClient, XhsError, login_flow
 
-    if args.cookies:
-        cookies = parse_cookie_header(args.cookies)
-    elif args.login:
-        cookies = {}
-    else:
-        cookies = load_cookies()
-
-    client = ZhihuSession(cookies)
-    user = client.me()
+    client = XhsClient()
+    try:
+        user = None if args.login else client.me()
+    except XhsError as e:
+        print(f"✗ {e}")
+        return 1
     if not user:
         print("未登录或登录已过期。")
         try:
-            cookies = login_flow()
-        except ZhihuError as e:
+            user = login_flow(client)
+        except XhsError as e:
             print(f"✗ {e}")
             return 1
-        client = ZhihuSession(cookies)
-        user = client.me()
         if not user:
-            print("✗ 登录失败：无法验证登录态")
+            print("✗ 登录失败：请先运行 `xhs login` 完成登录")
             return 1
 
     # probe terminal for kitty protocol + cell size before Textual starts
@@ -92,20 +82,23 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    from .ui import ZhihuApp
+    from .ui import XhsApp
 
-    print(f"欢迎，{user.get('name', '')}  ↑↓ 选择 · Enter 展开 · o 浏览器打开 · q 退出", file=sys.stderr)
+    print(
+        f"欢迎，{user.get('name', '')}  ↑↓ 选择 · Enter 展开 · o 浏览器打开 · q 退出",
+        file=sys.stderr,
+    )
 
     initial_item = None
     if args.url:
         try:
             print(f"正在打开链接：{args.url}", file=sys.stderr)
             initial_item = client.fetch_url(args.url)
-        except ZhihuError as e:
+        except XhsError as e:
             print(f"✗ 打开链接失败：{e}", file=sys.stderr)
             return 1
 
-    ZhihuApp(client, user, cell_size=cell, initial_item=initial_item).run()
+    XhsApp(client, user, cell_size=cell, initial_item=initial_item).run()
     return 0
 
 

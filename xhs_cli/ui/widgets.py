@@ -1,4 +1,4 @@
-"""Reusable widgets and helpers (top bars, cards, bottom bar, scroll areas)."""
+"""Reusable widgets and helpers (top bars, note cards, bottom bar, scroll areas)."""
 from __future__ import annotations
 
 import asyncio
@@ -20,13 +20,14 @@ from textual.events import Click
 from textual.screen import Screen
 from textual.widgets import Button, Input, Static
 
-from ..net import FeedItem, ZhihuSession, fmt_num, fmt_time
-from ..htmlparse import parse_highlighted
+from .. import config, kitty
+from ..net import FeedItem, XhsClient, fmt_num, fmt_time
 from .constants import (
     BADGE_COLOR,
+    ICON_COLLECT,
     ICON_COMMENT,
-    ICON_COPY,
     ICON_IMAGE,
+    ICON_LIKE,
     ICON_LINK,
     ICON_PLAY,
 )
@@ -55,7 +56,7 @@ def open_image_with_system(client, url: str) -> bool:
         ext = ".png" if im.format in ("PNG", None) else f".{im.format.lower()}"
     except Exception:
         pass
-    fd, path = tempfile.mkstemp(suffix=ext, prefix="zhihu-img-")
+    fd, path = tempfile.mkstemp(suffix=ext, prefix="xhs-img-")
     with os.fdopen(fd, "wb") as f:
         f.write(data)
     try:
@@ -74,44 +75,50 @@ def system_viewer_notice() -> str:
     return "终端不支持图片显示，已用系统默认看图程序打开"
 
 
-def push_item_screen(app: App, client: ZhihuSession, item: FeedItem) -> None:
-    """Route a feed/search card to its type-specific screen."""
-    from .question import QuestionScreen
+def push_item_screen(
+    app: App,
+    client: XhsClient,
+    item: FeedItem,
+    siblings: list[FeedItem] | None = None,
+    index: int | None = None,
+) -> None:
+    """Open a note in the content screen (optionally linked to its list)."""
     from .content import ContentScreen
 
-    if item.kind == "question":
-        app.push_screen(QuestionScreen(client, item))
-    else:
-        app.push_screen(ContentScreen(client, item))
+    if siblings and index is not None and index < len(siblings):
+        siblings = list(siblings)
+        siblings[index] = item
+    app.push_screen(ContentScreen(client, item, siblings=siblings, index=index))
 
 
-# 知乎站内链接（问题/回答/文章）；share code 等后缀不影响匹配。
-# 视频（zvideo）除外：TUI 无法播放，走浏览器。
-_ZHIHU_LINK_RE = re.compile(
-    r"https?://(?:www\.)?zhihu\.com/"
-    r"(?:question/\d+(?:/answer/\d+)?|p/\d+|article/\d+)"
-    r"|https?://zhuanlan\.zhihu\.com/p/\d+"
+# 小红书站内链接（笔记详情）；xsec_token 等后缀不影响匹配。
+_XHS_LINK_RE = re.compile(
+    r"https?://(?:www\.)?xiaohongshu\.com/"
+    r"(?:explore|discovery/item)/[\w]+"
+    r"|https?://xhslink\.com/[\w/]+"
 )
 
 
-def _open_zhihu_inline(app: App, client: ZhihuSession, url: str) -> None:
-    """Fetch a zhihu-internal link and open it inline (in-app)."""
+def _open_xhs_inline(app: App, client: XhsClient, url: str) -> None:
+    """Fetch an XHS-internal link and open it inline (in-app)."""
 
     async def _work():
         try:
             item = await asyncio.to_thread(client.fetch_url, url)
         except Exception as e:
-            app.notify(f"链接打开失败：{e}", severity="error", timeout=6)
+            # 拉取失败（笔记被删/参数受限等）时降级为浏览器打开
+            webbrowser.open(url)
+            app.notify(f"站内打开失败（{e}），已用浏览器打开", severity="warning", timeout=5)
             return
         push_item_screen(app, client, item)
 
     app.run_worker(_work(), name="open-link", group="link", exclusive=True)
 
 
-def open_link(app: App, client: ZhihuSession, url: str) -> None:
-    """Open a content link: zhihu-internal ones inline, others in browser."""
-    if _ZHIHU_LINK_RE.match((url or "").strip()):
-        _open_zhihu_inline(app, client, url)
+def open_link(app: App, client: XhsClient, url: str) -> None:
+    """Open a content link: XHS-internal ones inline, others in browser."""
+    if _XHS_LINK_RE.match((url or "").strip()):
+        _open_xhs_inline(app, client, url)
     else:
         webbrowser.open(url)
 
@@ -125,28 +132,24 @@ class TopBar(Static):
     def render(self) -> Text:
         t = Text(f" {self._title} ", style="bold white")
         if self._right:
-            t.append(f"  ·  {self._right}", style="#8a93a3")
+            t.append(f"  ·  {self._right}", style="#b9a3aa")
         return t
 
 
-class AnswerTopBar(Horizontal):
-    """Answer header chrome with a left-aligned back button."""
+class NoteTopBar(Horizontal):
+    """Note header chrome with a left-aligned back button."""
 
-    def __init__(self, title: str, detail_toggle: bool = False):
-        super().__init__(classes="answer-topbar")
+    def __init__(self, title: str):
+        super().__init__(classes="note-topbar")
         self.title = title
-        self.detail_toggle = detail_toggle
 
     def compose(self) -> ComposeResult:
-        yield Button(" 返回 ", id="answer-back")
-        yield Static(self.title, classes="answer-topbar-title")
-        if self.detail_toggle:
-            # trailing-end toggle: ▼ 展开问题详情 / ▲ 收起
-            yield Button(" ▼ ", id="question-detail-toggle", classes="answer-topbar-toggle")
+        yield Button(" 返回 ", id="note-back")
+        yield Static(self.title, classes="note-topbar-title")
 
 
 class FeedTopBar(Horizontal):
-    """Feed top bar: 推荐/热榜 tabs (one-line) + username right-aligned."""
+    """Feed top bar: 推荐/热门/历史 tabs (one-line) + username right-aligned."""
 
     def __init__(self, user: dict, mode: str = "recommend", **kwargs):
         super().__init__(classes="topbar", **kwargs)
@@ -155,7 +158,7 @@ class FeedTopBar(Horizontal):
 
     def compose(self) -> ComposeResult:
         yield Button(" 推荐 ", id="tab-rec", classes=self._tab_cls("recommend"))
-        yield Button(" 热榜 ", id="tab-hot", classes=self._tab_cls("hot"))
+        yield Button(" 热门 ", id="tab-hot", classes=self._tab_cls("hot"))
         yield Button(" 历史 ", id="tab-history", classes=self._tab_cls("history"))
         yield Static(f" {self.user.get('name') or ''} ", classes="tb-user")
 
@@ -209,8 +212,8 @@ class BottomBar(Horizontal):
     SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     # Fixed product colors (not terminal ANSI colors) distinguish each mode.
     MODE_COLORS = {
-        "cursor": "#2563eb",
-        "visual": "#7c3aed",
+        "cursor": "#ff2442",
+        "visual": "#ff6b81",
     }
     MODE_LABELS = {"normal": "NORMAL", "cursor": "CURSOR", "visual": "VISUAL"}
 
@@ -282,7 +285,7 @@ class BottomBar(Horizontal):
                     f"{self._busy_text} "
                 )
             else:
-                mode_button.label = " zhihu "
+                mode_button.label = " xhs "
             status.update("")
             return
         status.update(
@@ -298,7 +301,7 @@ class BottomBar(Horizontal):
         variables = self.app.get_css_variables()
         color = self.MODE_COLORS.get(
             mode,
-            variables.get("panel-darken-1", variables.get("panel", "#171a21")),
+            variables.get("panel-darken-1", variables.get("panel", "#231920")),
         )
         label = self.MODE_LABELS.get(mode, "NORMAL")
         button = self.query_one("#bottom-mode", Button)
@@ -333,111 +336,286 @@ class BottomBar(Horizontal):
         self.app.action_command_palette()
 
 
-class AnswerHeader(Vertical):
-    """Fixed header: 问题 / 作者 / 赞 / 链接.  Ctrl+click opens the link."""
+class NoteHeader(Vertical):
+    """Fixed header: title / author · likes · collects · comments / link.
+
+    Ctrl+click opens the note in the browser.
+    """
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.item: FeedItem | None = None
 
     def compose(self) -> ComposeResult:
-        yield Horizontal(
-            Button("Q", id="answer-question"),
-            Static("", id="answer-question-title"),
-            classes="answer-question-row",
-        )
-        yield Static("", id="answer-meta")
+        yield Static("", id="note-title")
+        yield Static("", id="note-meta")
 
     def set_item(self, item: FeedItem):
         self.item = item
-        question_button = self.query_one("#answer-question", Button)
-        question_button.display = item.kind == "answer" and bool(item.qid)
-        self.query_one("#answer-question-title", Static).update(
-            Text(item.title or "", style="bold")
+        self.query_one("#note-title", Static).update(
+            Text(item.title or "（无标题）", style="bold")
         )
         t = Text()
-        # 作者 · 赞 · 评论 · 时间
-        t.append(f"{item.author or '匿名用户'}", style="bold #eab308")
+        if item.rank:
+            t.append(f" {item.rank} ", style="bold white on #ff2442")
+            t.append("  ")
+        t.append(f"{item.author or '未知作者'}", style="bold #ffb3c1")
         if item.votes:
-            t.append(f"  ▲ {fmt_num(item.votes)}", style="#34d399")
+            t.append(f"  {ICON_LIKE} {fmt_num(item.votes)}", style="#ff4d6d")
+        if item.collects:
+            t.append(f"  {ICON_COLLECT} {fmt_num(item.collects)}", style="#fbbf24")
         if item.comments:
-            t.append(f"  {ICON_COMMENT} {fmt_num(item.comments)}", style="#8a93a3")
+            t.append(f"  {ICON_COMMENT} {fmt_num(item.comments)}", style="#b9a3aa")
         if item.created:
-            t.append(f"  {fmt_time(item.created)}", style="#8a93a3")
-        if item.kind == "zvideo":
-            t.append(f"  {ICON_PLAY} 视频", style="#f43f5e")
+            t.append(f"  {fmt_time(item.created)}", style="#b9a3aa")
+        if item.ip:
+            t.append(f"  IP {item.ip}", style="#b9a3aa")
+        if item.kind == "video":
+            t.append(f"  {ICON_PLAY} 视频", style="#c084fc")
+            if item.duration:
+                t.append(f" {item.duration}s", style="#b9a3aa")
         t.append("\n")
         if item.url:
             t.append(f"{ICON_LINK} ", style="dim")
-            t.append(item.url, style="underline #5eb4f8")
-        self.query_one("#answer-meta", Static).update(t)
+            t.append(item.url, style="underline #ff8fa3")
+        self.query_one("#note-meta", Static).update(t)
 
     def on_click(self, event: Click):
         if event.ctrl and self.item is not None and self.item.url:
             webbrowser.open(self.item.url)
 
 
-class Card(Static, can_focus=True):
-    def __init__(self, item: FeedItem, show_title: bool = True, **kwargs):
+class _CardOpenMixin:
+    """Shared click/keyboard opening behaviour for list and grid cards."""
+
+    def _open_item(self):
+        self.focus()
+        screen = self.screen
+        cards = getattr(screen, "_cards", None)
+        items = [c.item for c in cards()] if callable(cards) else None
+        index = None
+        if items:
+            try:
+                index = items.index(self.item)
+            except ValueError:
+                pass
+        push_item_screen(
+            self.app, self.app.client, self.item, siblings=items, index=index
+        )
+
+    def on_click(self, event):
+        self._open_item()
+
+
+class Card(_CardOpenMixin, Vertical, can_focus=True):
+    """List card: fixed 3:4 cover (optional) on the left + text on the right."""
+
+    def __init__(self, client, item: FeedItem, show_title: bool = True,
+                 show_image: bool = False, **kwargs):
         super().__init__(**kwargs)
+        self.client = client
         self.item = item
         self.show_title = show_title
+        self.show_image = bool(show_image) and kitty.enabled and bool(item.thumb)
         self._search_highlight: tuple[int, int] | None = None
-        # Search results wrap the matched part of the query in <em>; pre-parse
-        # so those spans render with a subtle highlight instead of raw tags.
-        self._title_text: Text | None = None
-        self._excerpt_text: Text | None = None
-        if item.search_match:
-            if "<" in (item.title or ""):
-                self._title_text = parse_highlighted(item.title, "bold")
-            if "<" in (item.excerpt or ""):
-                self._excerpt_text = parse_highlighted(item.excerpt, "#94a3b8")
 
-    def render(self) -> Text:
+    def compose(self) -> ComposeResult:
+        if self.show_image:
+            from .image import ThumbImage
+
+            yield Horizontal(
+                ThumbImage(
+                    self.client, self.item.thumb, cols=12, classes="card-thumb"
+                ),
+                Static(self._body_text(), classes="card-text"),
+                classes="card-row",
+            )
+        else:
+            yield Static(self._body_text(), classes="card-text")
+
+    def _body_text(self) -> Text:
         it = self.item
         t = Text()
-        # 热榜排序徽标（左上角）
+        # 热门排序徽标（左上角）
         if it.rank:
-            rcolor = "#f43f5e" if it.rank <= 3 else "#eab308" if it.rank <= 10 else "#64748b"
+            rcolor = "#ff2442" if it.rank <= 3 else "#fbbf24" if it.rank <= 10 else "#8a7580"
             t.append(f" {it.rank} ", style=f"bold white on {rcolor}")
             t.append("  ")
-        color = BADGE_COLOR.get(it.badge, "#64748b")
+        color = BADGE_COLOR.get(it.badge, "#ff2442")
         t.append(f" {it.badge} ", style=f"bold white on {color}")
         if self.show_title:
             t.append("  ")
-            if self._title_text is not None:
-                t.append_text(self._title_text)
-            else:
-                t.append(it.title, style="bold")
+            t.append(it.title, style="bold")
         t.append("\n")
         if it.excerpt:
-            if self._excerpt_text is not None:
-                t.append_text(self._excerpt_text)
-            else:
-                t.append(it.excerpt, style="#94a3b8")
+            t.append(it.excerpt, style="#c9b6bd")
             t.append("\n")
-        t.append(f" {it.author or '匿名用户'}", style="bold #eab308")
+        t.append(f" {it.author or '未知作者'}", style="bold #ffb3c1")
         if it.votes:
-            t.append(f"  ▲ {fmt_num(it.votes)}", style="#34d399")
+            t.append(f"  {ICON_LIKE} {fmt_num(it.votes)}", style="#ff4d6d")
+        if it.collects:
+            t.append(f"  {ICON_COLLECT} {fmt_num(it.collects)}", style="#fbbf24")
         if it.comments:
-            t.append(f"  {ICON_COMMENT} {fmt_num(it.comments)}", style="#8a93a3")
+            t.append(f"  {ICON_COMMENT} {fmt_num(it.comments)}", style="#b9a3aa")
         if it.created:
-            t.append(f"  {fmt_time(it.created)}", style="#8a93a3")
+            t.append(f"  {fmt_time(it.created)}", style="#b9a3aa")
         if it.images:
-            t.append(f"  {ICON_IMAGE} {len(it.images)}", style="#38bdf8")
-        if it.kind == "zvideo":
-            t.append(f"  {ICON_PLAY} 视频", style="#f43f5e")
+            t.append(f"  {ICON_IMAGE} {len(it.images)}", style="#ff8fa3")
+        if it.kind == "video":
+            t.append(f"  {ICON_PLAY} 视频", style="#c084fc")
         if self._search_highlight:
             t.stylize("bold black on #fbbf24", *self._search_highlight)
         return t
 
     def set_search_highlight(self, span: tuple[int, int] | None):
         self._search_highlight = span
-        self.refresh()
+        try:
+            self.query_one(".card-text", Static).update(self._body_text())
+        except Exception:
+            pass
 
-    def on_click(self, event):
-        self.focus()
-        push_item_screen(self.app, self.app.client, self.item)
+
+_COUNT_SEMAPHORE = asyncio.Semaphore(1)
+# 推荐流卡片没有图片数量，聚焦格子时按需补拉详情；限制频率避免触发风控。
+_COUNT_FETCH_INTERVAL = 1.5
+_COUNT_LAST_FETCH = 0.0
+_COUNT_FOCUS_DELAY = 0.8
+
+
+class GridCard(_CardOpenMixin, Vertical, can_focus=True):
+    """Grid cell: 3:4 cover on top, title/meta below, ``n`` badge overlay."""
+
+    def __init__(self, client, item: FeedItem, **kwargs):
+        super().__init__(**kwargs)
+        self.client = client
+        self.item = item
+        self._thumb = None
+        self._count_loading = False
+        self._count_timer = None
+
+    def compose(self) -> ComposeResult:
+        from .image import ThumbImage
+
+        url = self.item.thumb or (self.item.images[0] if self.item.images else "")
+        self._thumb = ThumbImage(
+            self.client,
+            url,
+            auto_width=True,
+            label=self._count_label(),
+            classes="grid-thumb",
+        )
+        yield self._thumb
+        yield Static(self._title_text(), classes="grid-title")
+        yield Static(self._meta_text(), classes="grid-meta")
+
+    def _count_label(self) -> str:
+        count = len(self.item.images or [])
+        return f" {count} " if count > 1 else ""
+
+    def _title_text(self) -> Text:
+        title = " ".join((self.item.title or "（无标题）").split())
+        text = Text(title, style="bold")
+        if self.item.kind == "video":
+            text.append(f"  {ICON_PLAY}", style="#c084fc")
+        return text
+
+    def _meta_text(self) -> Text:
+        it = self.item
+        text = Text()
+        text.append(f"{it.author or '未知作者'}", style="#ffb3c1")
+        if it.votes:
+            text.append(f"  {ICON_LIKE} {fmt_num(it.votes)}", style="#ff4d6d")
+        if it.created:
+            text.append(f"  {fmt_time(it.created)}", style="#b9a3aa")
+        return text
+
+    def on_focus(self):
+        """Lazily fetch the photo count for feed items (list payloads only
+        carry a cover, not the full image list).
+
+        Debounced so quickly moving through cells does not fire an API call
+        per cell (which can trigger XHS risk control)."""
+        if (
+            self.item.kind != "note"
+            or self.item.images
+            or self._count_loading
+            or not self.item.rid
+        ):
+            return
+        if self._count_timer is not None:
+            self._count_timer.stop()
+        self._count_timer = self.set_timer(
+            _COUNT_FOCUS_DELAY, self._start_count_fetch
+        )
+
+    def on_blur(self):
+        if self._count_timer is not None:
+            self._count_timer.stop()
+            self._count_timer = None
+
+    def _start_count_fetch(self):
+        self._count_timer = None
+        if self._count_loading or self.item.images:
+            return
+        self._count_loading = True
+        self.run_worker(self._fetch_count(), name=f"count-{id(self)}")
+
+    async def _fetch_count(self):
+        global _COUNT_LAST_FETCH
+        try:
+            async with _COUNT_SEMAPHORE:
+                wait = _COUNT_FETCH_INTERVAL - (time.monotonic() - _COUNT_LAST_FETCH)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                _COUNT_LAST_FETCH = time.monotonic()
+                full = await asyncio.to_thread(
+                    self.client.read, self.item.rid, self.item.xsec_token
+                )
+        except Exception:
+            return
+        finally:
+            self._count_loading = False
+        if full.images:
+            self.item.images = full.images
+            if self._thumb is not None:
+                self._thumb.set_label(self._count_label())
+
+
+# Grid cell presets: target cell width in terminal columns.
+GRID_CELL_WIDTHS = {
+    "small": 18,
+    "medium": 26,
+    "large": 34,
+    "xlarge": 46,
+}
+GRID_CELL_ORDER = ("small", "medium", "large", "xlarge")
+GRID_CELL_LABELS = {
+    "small": "小",
+    "medium": "中",
+    "large": "大",
+    "xlarge": "特大",
+}
+
+
+def grid_cell_size() -> str:
+    size = str(config.get("feed_grid_cell", "xlarge") or "xlarge").lower()
+    return size if size in GRID_CELL_WIDTHS else "xlarge"
+
+
+def grid_column_count(width: int) -> int:
+    """Columns that fit ``width`` at the configured cell size (responsive)."""
+    cell = GRID_CELL_WIDTHS[grid_cell_size()]
+    gutter = 1
+    available = max(40, width) - 4  # scroll padding + scrollbar
+    return max(1, min(8, (available + gutter) // (cell + gutter)))
+
+
+def build_card(client, item: FeedItem, view: str = "list",
+               show_images: bool = False):
+    """Create the list card, or a grid cell when the grid view is active."""
+    if view == "grid" and kitty.enabled and item.thumb:
+        return GridCard(client, item)
+    return Card(client, item, show_image=show_images)
 
 
 def _truncate_cells(value: str, width: int) -> tuple[str, bool]:
@@ -452,51 +630,50 @@ def _truncate_cells(value: str, width: int) -> tuple[str, bool]:
     return out, False
 
 
-class HistoryAnswerRow(Static, can_focus=True):
-    """A single selectable answer from local history."""
+class HistoryNoteRow(Static, can_focus=True):
+    """A single selectable note from local history."""
 
-    def __init__(self, answer: dict, index: int, **kwargs):
+    def __init__(self, note: dict, index: int, **kwargs):
         super().__init__(**kwargs)
-        self.answer = answer
+        self.note = note
         self.index = index
-        self.url = answer.get("url") or ""
+        self.url = note.get("url") or ""
 
     def render(self) -> Text:
         badge = f" {self.index} "
-        author = self.answer.get("author") or "匿名用户"
-        author_text = f" {author}："
-        prefix = badge + author_text
-        excerpt = " ".join((self.answer.get("excerpt") or "（无摘要）").split())
+        title = " ".join((self.note.get("title") or "（无标题笔记）").split())
+        prefix = badge + f" {title}："
+        excerpt = " ".join((self.note.get("excerpt") or "（无摘要）").split())
         width = max(8, self.size.width - 1)
         variables = self.app.get_css_variables()
         # Number badge background cycles through the theme's preset hues.
         hues = [
             variables.get(key, fallback)
             for key, fallback in (
-                ("error", "#f43f5e"), ("warning", "#eab308"),
-                ("success", "#16a34a"), ("accent", "#38bdf8"),
-                ("primary", "#2563eb"), ("secondary", "#7c3aed"),
+                ("error", "#ef4444"), ("warning", "#fbbf24"),
+                ("success", "#34d399"), ("accent", "#ff8fa3"),
+                ("primary", "#ff2442"), ("secondary", "#ff6b81"),
             )
         ]
         primary = hues[(self.index - 1) % len(hues)]
-        muted = variables.get("text-muted", "#8a93a3")
-        created = int(self.answer.get("created") or 0)
+        muted = variables.get("text-muted", "#b9a3aa")
+        created = int(self.note.get("created") or 0)
         date = time.strftime("%Y-%m-%d", time.localtime(created)) if created else ""
-        votes = fmt_num(self.answer.get("votes") or 0)
-        comments = fmt_num(self.answer.get("comments") or 0)
-        images = int(self.answer.get("images") or 0)
-        suffix = f"▲ {votes}  {ICON_COMMENT} {comments}  {ICON_IMAGE} {images}"
+        votes = fmt_num(self.note.get("votes") or 0)
+        comments = fmt_num(self.note.get("comments") or 0)
+        images = int(self.note.get("images") or 0)
+        suffix = f"{ICON_LIKE} {votes}  {ICON_COMMENT} {comments}  {ICON_IMAGE} {images}"
+        if self.note.get("kind") == "video":
+            suffix = f"{ICON_PLAY} {suffix}"
         if date:
             suffix += f"  |  {date}"
 
-        # Keep the author and right metadata visible; the excerpt yields its
+        # Keep the title and right metadata visible; the excerpt yields its
         # space first and receives a muted ellipsis when truncated.
         prefix_text, prefix_cut = _truncate_cells(prefix, width)
-        # Start with an unstyled root Text. Giving the root a background
-        # would make every subsequently appended span inherit the badge color.
         t = Text()
         t.append(badge, style=f"bold white on {primary}")
-        t.append(prefix_text[len(badge):], style="bold #eab308")
+        t.append(prefix_text[len(badge):], style="bold #ffb3c1")
         if prefix_cut:
             t.append("…", style=muted)
             return t
@@ -508,17 +685,17 @@ class HistoryAnswerRow(Static, can_focus=True):
             t.append("…", style=muted)
         occupied = cell_len(t.plain) + cell_len(suffix)
         t.append(" " * max(1, width - occupied))
-        t.append(f"▲ {votes}", style="#34d399")
+        t.append(f"{ICON_LIKE} {votes}", style="#ff4d6d")
         t.append(f"  {ICON_COMMENT} {comments}", style=muted)
-        t.append(f"  {ICON_IMAGE} {images}", style="#38bdf8")
+        t.append(f"  {ICON_IMAGE} {images}", style="#ff8fa3")
         if date:
             t.append(f"  |  {date}", style=muted)
         return t
 
     def on_click(self, event: Click):
         self.focus()
-        if hasattr(self.screen, "open_history_row"):
-            self.screen.open_history_row(self)
+        if hasattr(self.screen, "open_history_note"):
+            self.screen.open_history_note(self)
 
 
 class HistoryHeading(Static):
@@ -528,12 +705,12 @@ class HistoryHeading(Static):
 
     def render(self) -> Text:
         width = max(1, self.size.width)
-        title = self.entry.get("title") or "（无标题问题）"
+        title = self.entry.get("author") or "未知作者"
         when = fmt_time(self.entry.get("viewed"))
         variables = self.app.get_css_variables()
-        primary = variables.get("primary", "#2563eb")
+        primary = variables.get("primary", "#ff2442")
         border = variables.get("border", primary)
-        muted = variables.get("text-muted", "#8a93a3")
+        muted = variables.get("text-muted", "#b9a3aa")
         title_width = max(1, width - cell_len(when) - 4)
         shown, cut = _truncate_cells(title, title_width)
 
@@ -557,7 +734,7 @@ class HistoryHeading(Static):
 
 
 class HistoryEntry(Vertical):
-    """Compact history group; adjacent groups share one double rule."""
+    """Compact history group (one author); adjacent groups share one double rule."""
 
     def __init__(self, entry: dict, **kwargs):
         super().__init__(**kwargs)
@@ -566,17 +743,17 @@ class HistoryEntry(Vertical):
     def compose(self) -> ComposeResult:
         entry = self.entry
         yield HistoryHeading(entry, classes="history-heading")
-        answers = entry.get("answers") or []
-        if not answers:
-            yield Static("（尚未浏览回答）", classes="history-empty")
-        for index, answer in enumerate(answers, 1):
-            yield HistoryAnswerRow(answer, index)
+        notes = entry.get("notes") or []
+        if not notes:
+            yield Static("（尚未浏览笔记）", classes="history-empty")
+        for index, note in enumerate(notes, 1):
+            yield HistoryNoteRow(note, index)
 
 
 class HistoryEndRule(Static):
     def render(self) -> Text:
         variables = self.app.get_css_variables()
-        border = variables.get("border", variables.get("primary", "#2563eb"))
+        border = variables.get("border", variables.get("primary", "#ff2442"))
         width = max(1, self.size.width)
         inner = max(1, width - 4)
         line = f"  {'═' * inner}  " if width > 4 else "═" * width
@@ -608,8 +785,8 @@ def _set_search_highlight(widget: Static, span: tuple[int, int] | None) -> None:
     if hasattr(widget, "set_search_highlight"):
         widget.set_search_highlight(span)
         return
-    # Plain Static blocks (math/code/table text) can be highlighted by
-    # temporarily replacing their Rich Text renderable, then restoring it.
+    # Plain Static blocks can be highlighted by temporarily replacing their
+    # Rich Text renderable, then restoring it.
     if span is None:
         original = getattr(widget, "_page_search_original", None)
         if original is not None:
@@ -807,39 +984,13 @@ class LinkButton(Button):
         clean_title = " ".join((title or "").split()).strip()
         label = Text()
         if clean_title and clean_title != url:
-            label.append(f" {ICON_LINK}  {clean_title}", style="#7dd3fc")
+            label.append(f" {ICON_LINK}  {clean_title}", style="#ff8fa3")
             label.append("\n")
-            label.append(f"    {url}", style="underline #7dd3fc")
+            label.append(f"    {url}", style="underline #ff8fa3")
         else:
-            label.append(f" {ICON_LINK}  {url}", style="underline #7dd3fc")
+            label.append(f" {ICON_LINK}  {url}", style="underline #ff8fa3")
         super().__init__(label, classes="linkbtn", **kwargs)
         self.url = url
-
-
-class CodeHead(Horizontal):
-    """One-row header above a code block: optional language + copy button.
-
-    The copy button is 4 cells wide, one row tall, right-aligned; clicking
-    copies the whole code block to the clipboard (OSC 52).
-    """
-
-    def __init__(self, code: str, lang: str = "", **kwargs):
-        super().__init__(classes="code-head", **kwargs)
-        self.code = code
-        self.lang = (lang or "").strip()
-
-    def compose(self) -> ComposeResult:
-        # Language label is the flexible element so the copy button always
-        # sits inside the screen at the right edge (a separate 1fr fill
-        # would push the button off-screen).
-        yield Static(f" {self.lang} " if self.lang else "", classes="code-lang")
-        yield Button(ICON_COPY, classes="code-copy")
-
-    @on(Button.Pressed, ".code-copy")
-    def _copy_code(self, event: Button.Pressed):
-        if self.code:
-            self.app.copy_to_clipboard(self.code)
-            self.app.notify("已复制代码", timeout=2)
 
 
 class ContentScroll(VerticalScroll):

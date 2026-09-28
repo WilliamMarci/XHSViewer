@@ -1,4 +1,4 @@
-"""Inline images and the popup viewer (kitty graphics protocol)."""
+"""Inline images, the photo gallery, and the popup viewer (kitty protocol)."""
 from __future__ import annotations
 
 import asyncio
@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import webbrowser
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
@@ -16,10 +17,14 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
-from .. import kitty
-from ..net import ZhihuSession
+from .. import config, kitty
+from ..net import XhsClient
 from .constants import ICON_COPY, ICON_IMAGE
 from .widgets import open_image_with_system, system_viewer_notice
+
+# Limit concurrent cover downloads so a grid page does not flood the network.
+_THUMB_SEMAPHORE = asyncio.Semaphore(2)
+_THUMB_BG = (28, 21, 25)  # canvas letterbox color (matches $surface)
 
 
 def copy_image_bytes(data: bytes) -> tuple[bool, str]:
@@ -45,7 +50,7 @@ def copy_image_bytes(data: bytes) -> tuple[bool, str]:
         ext = ".png" if im.format == "PNG" else f".{(im.format or 'bin').lower()}"
     except Exception:
         pass
-    fd, path = tempfile.mkstemp(suffix=ext, prefix="zhihu-copy-")
+    fd, path = tempfile.mkstemp(suffix=ext, prefix="xhs-copy-")
     with os.fdopen(fd, "wb") as f:
         f.write(data)
     try:
@@ -86,6 +91,148 @@ def _placeholder_text(img_id: int, cols: int, rows: int) -> Text:
     return text
 
 
+def _thumb_text(img_id: int, cols: int, rows: int, label: str = "") -> Text:
+    """Placeholder grid with an optional opaque label in the last row."""
+
+    def cell(y: int, x: int) -> str:
+        n = len(kitty.DIACRITICS)
+        return f"{kitty.PLACEHOLDER}{kitty.DIACRITICS[y % n]}{kitty.DIACRITICS[x % n]}"
+
+    style = kitty.image_id_style(img_id)
+    label_cells = min(cols, cell_len(label)) if label else 0
+    text = Text()
+    for y in range(rows):
+        usable = max(0, cols - label_cells) if y == rows - 1 else cols
+        for x in range(usable):
+            text.append(cell(y, x), style=style)
+        if y == rows - 1 and label_cells:
+            text.append(label, style="bold white on #000000")
+        if y + 1 < rows:
+            text.append("\n")
+    return text
+
+
+class ThumbImage(Static):
+    """Fixed-aspect inline cover thumbnail (Kitty protocol, contain-fit).
+
+    ``auto_width=True`` makes the thumbnail track the widget width (used by
+    the grid cells); otherwise ``cols`` fixes the cell width and the height
+    follows the requested aspect ratio.
+    """
+
+    def __init__(
+        self,
+        client: XhsClient,
+        url: str,
+        cols: int = 12,
+        auto_width: bool = False,
+        aspect: tuple[int, int] = (3, 4),
+        label: str = "",
+        **kwargs,
+    ):
+        super().__init__("", **kwargs)
+        self.client = client
+        self.url = url
+        self.cols = max(1, cols)
+        self.auto_width = auto_width
+        self.aspect = aspect
+        self.label = label
+        self._img_id = (id(self) ^ 0x51D3A7) & 0xFFFFFF or 3
+        self._loaded = False
+        self._loading = False
+        self._error = ""
+
+    # -- geometry ---------------------------------------------------------
+
+    def rows_for(self, cols: int) -> int:
+        cw, ch = self.app.cell_size or (8, 16)
+        rows = round(cols * cw * self.aspect[1] / max(1, self.aspect[0] * ch))
+        return max(1, rows)
+
+    def on_mount(self):
+        if not kitty.enabled or not self.url:
+            return
+        if self.auto_width:
+            if not self.size.width:
+                return  # wait for on_resize
+            self.cols = self.size.width
+        else:
+            self.styles.width = self.cols
+        self.styles.height = self.rows_for(self.cols)
+        self._schedule()
+
+    def on_resize(self, event):
+        if not kitty.enabled or not self.url:
+            return
+        cols = event.size.width if self.auto_width else self.cols
+        if not cols or (cols == self.cols and self._loaded):
+            return
+        self.cols = cols
+        self.styles.height = self.rows_for(cols)
+        if self.is_mounted:
+            self._schedule()
+
+    # -- loading ----------------------------------------------------------
+
+    def _schedule(self):
+        if self._loading or not self.url or not kitty.enabled:
+            return
+        self._loading = True
+        self.run_worker(self.load(), name=f"thumb-{self._img_id}")
+
+    async def load(self):
+        self._error = ""
+        try:
+            async with _THUMB_SEMAPHORE:
+                data = await asyncio.to_thread(
+                    self.client.fetch_image_bytes, self.url
+                )
+                if not self.is_mounted:
+                    return
+                from io import BytesIO
+                from PIL import Image as PILImage
+
+                source = PILImage.open(BytesIO(data)).convert("RGB")
+                cw, ch = self.app.cell_size or (8, 16)
+                cols = self.cols
+                rows = self.rows_for(cols)
+                box_w, box_h = cols * cw, rows * ch
+                scale = min(box_w / source.width, box_h / source.height)
+                width = max(1, round(source.width * scale))
+                height = max(1, round(source.height * scale))
+                resized = source.resize((width, height), PILImage.LANCZOS)
+                canvas = PILImage.new("RGB", (box_w, box_h), _THUMB_BG)
+                canvas.paste(
+                    resized, ((box_w - width) // 2, (box_h - height) // 2)
+                )
+                driver = self.app._driver
+                driver.write(
+                    kitty.transmit_rgba(
+                        canvas.convert("RGBA").tobytes(), self._img_id, box_w, box_h
+                    )
+                )
+                driver.write(kitty.virtual_placement(self._img_id, cols, rows))
+            self.update(_thumb_text(self._img_id, cols, rows, self.label))
+            self._loaded = True
+        except Exception as exc:
+            self._error = str(exc)
+            self.update(Text(""))
+        finally:
+            self._loading = False
+
+    def set_label(self, label: str):
+        self.label = label
+        if self._loaded:
+            self.update(_thumb_text(self._img_id, self.cols, self.rows_for(self.cols), label))
+
+    def on_unmount(self):
+        if self._loaded and kitty.enabled:
+            try:
+                self.app._driver.write(kitty.delete_image(self._img_id))
+            except Exception:
+                pass
+
+
 class ImageViewerScreen(ModalScreen[None]):
     """Popup image viewer (Kitty protocol, unicode placeholders).
 
@@ -114,7 +261,7 @@ class ImageViewerScreen(ModalScreen[None]):
 
     def __init__(
         self,
-        client: ZhihuSession,
+        client: XhsClient,
         urls: list[str],
         index: int = 0,
         caption: str = "",
@@ -324,13 +471,215 @@ class ImageViewerScreen(ModalScreen[None]):
             webbrowser.open(self.urls[self.index])
 
 
+class GallerySection(Vertical):
+    """Photo-first inline gallery: current image + prev/next controls.
+
+    The first image is loaded inline automatically (when the terminal
+    supports the kitty protocol); ``‹``/``›`` switch photos, ``放大`` opens
+    the fullscreen viewer, and the copy button puts the photo on the
+    system clipboard.
+    """
+
+    MAX_COLS = 80
+    MAX_ROWS = 22
+
+    def __init__(
+        self,
+        client: XhsClient,
+        urls: list[str],
+        caption: str = "",
+        start: int = 0,
+        title: str = "图集",
+    ):
+        super().__init__(classes="gallery")
+        self.client = client
+        self.urls = urls
+        self.caption = caption
+        self.title = title
+        self.index = max(0, min(start, len(urls) - 1)) if urls else 0
+        self._img_id = (id(self) ^ 0x2A9F31) & 0xFFFFFF or 2
+        self._loaded = False
+        self._loading = False
+        self._img_data: bytes | None = None
+
+    def compose(self) -> ComposeResult:
+        self._prev = Button(" ‹ ", classes="gallery-prev")
+        self._next = Button(" › ", classes="gallery-next")
+        self._counter = Static("", classes="gallery-counter")
+        self._zoom = Button(f"{ICON_IMAGE} 放大", classes="gallery-zoom")
+        self._copy = Button(ICON_COPY, classes="gallery-copy")
+        yield Horizontal(
+            self._prev,
+            self._counter,
+            self._next,
+            self._zoom,
+            self._copy,
+            classes="gallery-actions",
+        )
+        yield Static("", classes="img-inline")
+        yield Static("", classes="img-caption")
+
+    def on_mount(self):
+        self._update_counter()
+        if kitty.enabled and config.get("expand_images_by_default", True):
+            self.run_worker(self._load_current(), name="gallery-load")
+
+    def _update_counter(self):
+        total = len(self.urls)
+        self._counter.update(f" {self.index + 1}/{total} " if total else " 0/0 ")
+        self._prev.disabled = total <= 1
+        self._next.disabled = total <= 1
+        if not kitty.enabled:
+            self._zoom.label = " 用系统程序查看 "
+
+    # -- loading ----------------------------------------------------------
+
+    async def _load_current(self):
+        if not self.urls:
+            return
+        grid = self.query_one(".img-inline", Static)
+        self._loading = True
+        self._zoom.label = f"{ICON_IMAGE} 加载中…"
+        try:
+            data = await asyncio.to_thread(
+                self.client.fetch_image_bytes, self.urls[self.index]
+            )
+            self._img_data = data
+            if not kitty.enabled:
+                self._zoom.label = " 用系统程序查看 "
+                return
+            from io import BytesIO
+            from PIL import Image as PILImage
+
+            im = PILImage.open(BytesIO(data))
+            fmt = (im.format or im.mode or "图片").upper()
+            iw, ih = im.size
+            cw, ch = self.app.cell_size
+            available = self.size.width or self.app.size.width or 80
+            max_cols = max(1, min(self.MAX_COLS, available - 2))
+            scale = min(max_cols * cw / iw, self.MAX_ROWS * ch / ih, 1.0)
+            cols = max(1, min(max_cols, int(iw * scale) // max(1, cw)))
+            rows = max(1, min(self.MAX_ROWS, int(ih * scale) // max(1, ch)))
+            disp_w, disp_h = cols * cw, rows * ch
+            resized = im.convert("RGBA").resize((disp_w, disp_h), PILImage.LANCZOS)
+            driver = self.app._driver
+            driver.write(
+                kitty.transmit_rgba(resized.tobytes(), self._img_id, disp_w, disp_h)
+            )
+            driver.write(kitty.virtual_placement(self._img_id, cols, rows))
+            grid.update(_placeholder_text(self._img_id, cols, rows))
+            grid.styles.width = cols
+            grid.styles.height = rows
+            info = (
+                self.caption.strip()
+                or f"{fmt} · {iw}×{ih} px · {len(data) / 1024:.1f} KiB"
+            )
+            prefix = f"{self.index + 1}/{len(self.urls)} · " if len(self.urls) > 1 else ""
+            self.query_one(".img-caption", Static).update(
+                Text(prefix + info, style="dim")
+            )
+            self._loaded = True
+            self._zoom.label = f"{ICON_IMAGE} 放大"
+        except Exception as e:
+            grid.update(Text(f"图片加载失败：{e}", style="red"))
+            self._zoom.label = f"{ICON_IMAGE} 重试"
+        finally:
+            self._loading = False
+
+    def _render_current(self):
+        if not kitty.enabled:
+            self._update_counter()
+            return
+        if self._loaded:
+            try:
+                self.app._driver.write(kitty.delete_image(self._img_id))
+            except Exception:
+                pass
+        self._loaded = False
+        grid = self.query_one(".img-inline", Static)
+        grid.update("")
+        grid.styles.width = "auto"
+        grid.styles.height = "auto"
+        self.query_one(".img-caption", Static).update("")
+        self.run_worker(self._load_current(), name="gallery-load")
+
+    # -- public controls --------------------------------------------------
+
+    def step(self, delta: int):
+        if len(self.urls) <= 1:
+            return
+        self.index = (self.index + delta) % len(self.urls)
+        self._update_counter()
+        self._render_current()
+
+    def open_viewer(self):
+        if not self.urls:
+            return
+        if not kitty.enabled:
+            self.app.run_worker(
+                self._fallback_open(), name="img-sys", group="img", exclusive=True
+            )
+            return
+        if not self._loaded:
+            self.run_worker(self._load_current(), name="gallery-load")
+            return
+        self.app.push_screen(
+            ImageViewerScreen(self.client, self.urls, self.index, self.caption)
+        )
+
+    def on_unmount(self):
+        if self._loaded and kitty.enabled:
+            try:
+                self.app._driver.write(kitty.delete_image(self._img_id))
+            except Exception:
+                pass
+
+    @on(Button.Pressed, ".gallery-prev")
+    def _prev_pressed(self, event: Button.Pressed):
+        self.step(-1)
+
+    @on(Button.Pressed, ".gallery-next")
+    def _next_pressed(self, event: Button.Pressed):
+        self.step(1)
+
+    @on(Button.Pressed, ".gallery-zoom")
+    def _zoom_pressed(self, event: Button.Pressed):
+        self.open_viewer()
+
+    @on(Button.Pressed, ".gallery-copy")
+    def _copy_pressed(self, event: Button.Pressed):
+        url = self.urls[self.index] if self.urls else ""
+        data = self._img_data
+        if not data:
+            if url:
+                self.app.copy_to_clipboard(url)
+                self.app.notify("已复制图片链接", timeout=2)
+            return
+        ok, msg = copy_image_bytes(data)
+        if ok:
+            self.app.notify(msg, timeout=3)
+        else:
+            self.app.copy_to_clipboard(url)
+            self.app.notify("未找到系统剪贴板工具，已复制图片链接", timeout=3)
+
+    async def _fallback_open(self):
+        try:
+            ok = await asyncio.to_thread(
+                open_image_with_system, self.client, self.urls[self.index]
+            )
+            if ok:
+                self.app.notify(system_viewer_notice(), timeout=4)
+        except Exception as e:
+            self.app.notify(f"图片打开失败：{e}", severity="error", timeout=6)
+
+
 class ImageSection(Vertical):
     """Bounded inline image with a button opening the full viewer."""
 
     MAX_COLS = 64
     MAX_ROWS = 18
 
-    def __init__(self, client: ZhihuSession, urls: list[str], no: int, caption: str = ""):
+    def __init__(self, client: XhsClient, urls: list[str], no: int, caption: str = ""):
         super().__init__(classes="imgsec")
         self.client = client
         self.urls = urls

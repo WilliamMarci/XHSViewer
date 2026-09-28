@@ -3,25 +3,24 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "zhihuviewer"
-version = "0.2.0"
-description = "知乎 CLI 客户端：推荐流卡片浏览、终端内图片查看（Kitty 协议，支持 Ghostty）"
+name = "xhsviewer"
+version = "0.3.0"
+description = "小红书 CLI 客户端：推荐流图文浏览、终端内图片查看（Kitty 协议，支持 Ghostty），基于 xhs CLI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "textual>=0.86,<0.90",
     "requests>=2.31",
+    "pillow>=10.0",
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
-    "pillow>=10.0",
-    "pycryptodome>=3.20",
 ]
 
 [project.scripts]
-zhihuviewer = "zhihu_cli.__main__:main"
+xhsviewer = "xhs_cli.__main__:main"
 
 [tool.setuptools]
-packages = ["zhihu_cli", "zhihu_cli.ui"]
+packages = ["xhs_cli", "xhs_cli.ui"]
 
 [tool.setuptools.package-data]
-zhihu_cli = ["*.tcss"]
+xhs_cli = ["*.tcss"]

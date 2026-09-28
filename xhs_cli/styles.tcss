@@ -1,4 +1,4 @@
-/* zhihu-cli theme: simple, modern, compact */
+/* xhs-cli theme: Xiaohongshu red, simple, modern, compact */
 
 Screen {
     background: $background;
@@ -13,13 +13,13 @@ TopBar {
     color: $text;
 }
 
-.answer-topbar {
+.note-topbar {
     width: 100%;
     height: 1;
     background: $surface;
 }
 
-#answer-back {
+#note-back {
     width: auto;
     min-width: 0;
     height: 1;
@@ -30,55 +30,29 @@ TopBar {
     text-style: bold;
 }
 
-.answer-question-row {
-    width: 100%;
-    height: 1;
-}
-
-#answer-question {
-    width: 3;
-    min-width: 3;
-    height: 1;
-    border: none;
-    padding: 0;
-    background: $primary;
-    color: $text;
-    text-style: bold;
-}
-
-#answer-question-title {
-    width: 1fr;
-    height: 1;
-    padding: 0 0 0 1;
-}
-
-#answer-meta {
-    width: 100%;
-    height: auto;
-}
-
-#answer-back:hover,
-#answer-back:focus,
-#answer-question:hover,
-#answer-question:focus {
+#note-back:hover,
+#note-back:focus {
     background: $primary;
     color: $text;
 }
 
-.answer-topbar-title {
+.note-topbar-title {
     width: 1fr;
     height: 1;
     padding: 0 1;
     color: $text;
 }
 
-/* trailing-end question-detail toggle (▼ 展开 / ▲ 收起) */
-.answer-topbar-toggle {
+/* note header (fixed): title + author/meta */
+#note-title {
+    width: 100%;
     height: 1;
-    min-width: 0;
-    border: none;
-    padding: 0 2;
-    color: $accent;
+    padding: 0 1;
+}
+
+#note-meta {
+    width: 100%;
+    height: auto;
 }
 
 /* one-row bottom bar: mode badge + spinner + key hints */
@@ -171,17 +145,23 @@ StatusLine {
     color: $text-muted;
 }
 
+.tab.tab-active {
+    background: $primary;
+    color: $text;
+    text-style: bold;
+}
+
+.tb-user {
+    width: 1fr;
+    height: 1;
+    text-align: right;
+    color: $text-muted;
+}
+
 HistoryEntry {
     height: auto;
     margin: 0;
     padding: 0;
-    background: $surface;
-}
-
-.question-detail {
-    margin: 0 1 1 1;
-    padding: 1 2;
-    border: round $border;
     background: $surface;
 }
 
@@ -196,7 +176,7 @@ HistoryEndRule {
     margin: 0 1;
 }
 
-HistoryAnswerRow {
+HistoryNoteRow {
     height: 1;
     margin: 0 1;
     padding: 0 1;
@@ -204,8 +184,8 @@ HistoryAnswerRow {
     background: $surface;
 }
 
-HistoryAnswerRow:hover,
-HistoryAnswerRow:focus {
+HistoryNoteRow:hover,
+HistoryNoteRow:focus {
     background: $boost;
     color: $accent;
     text-style: bold;
@@ -245,19 +225,6 @@ PageSearchBar {
     color: $text;
 }
 
-.tab.tab-active {
-    background: $primary;
-    color: $text;
-    text-style: bold;
-}
-
-.tb-user {
-    width: 1fr;
-    height: 1;
-    text-align: right;
-    color: $text-muted;
-}
-
 #feed {
     height: 1fr;
 }
@@ -268,6 +235,7 @@ PageSearchBar {
 }
 
 Card {
+    height: auto;
     margin: 0 1;
     padding: 1 2;
     border: round $border;
@@ -280,20 +248,175 @@ Card:hover {
 }
 
 Card:focus {
-    border: round $accent;
+    border: round $primary;
     background: $primary-background;
+}
+
+/* list card with a 3:4 cover on the left */
+.card-row {
+    width: 100%;
+    height: auto;
+}
+
+.card-thumb {
+    width: 12;
+    height: 8;
+    margin: 0 1 0 0;
+}
+
+.card-text {
+    width: 1fr;
+    height: auto;
+}
+
+/* grid view: every card becomes an image cell */
+FeedScroll.grid-mode {
+    layout: grid;
+    grid-rows: auto;
+    grid-gutter: 1;
+    padding: 0 1;
+}
+
+GridCard {
+    height: auto;
+    margin: 0;
+    padding: 0 0 1 0;
+    border: round $border;
+    background: $surface;
+}
+
+GridCard:hover {
+    border: round $accent;
+}
+
+GridCard:focus {
+    border: round $primary;
+    background: $primary-background;
+}
+
+.grid-thumb {
+    width: 100%;
+    height: auto;
+}
+
+.grid-title {
+    width: 100%;
+    height: auto;
+    max-height: 2;
+    padding: 0 1;
+    text-style: bold;
+}
+
+.grid-meta {
+    width: 100%;
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
 }
 
 #content {
     height: 1fr;
 }
 
-AnswerHeader {
+NoteHeader {
     height: auto;
     max-height: 8;
     padding: 1 2 1 2;
     border-bottom: solid $border;
     background: $surface;
+}
+
+/* topic chips (#话题) */
+.tag-row {
+    height: 1;
+    width: 100%;
+    margin: 1 1 0 1;
+}
+
+.tagbtn {
+    height: 1;
+    min-width: 0;
+    border: none;
+    padding: 0 1;
+    margin: 0 1 0 0;
+    color: $accent;
+    background: $boost;
+    text-style: bold;
+}
+
+.tagbtn:hover,
+.tagbtn:focus {
+    background: $primary;
+    color: $text;
+}
+
+/* photo gallery: inline preview + ‹ › controls */
+.gallery {
+    height: auto;
+    margin: 1 0 0 0;
+    align: left top;
+}
+
+.gallery-actions {
+    width: 100%;
+    height: 1;
+    align: left middle;
+}
+
+.gallery-prev,
+.gallery-next,
+.gallery-zoom {
+    height: 1;
+    min-width: 0;
+    border: none;
+    padding: 0 2;
+    margin: 0 0 0 2;
+    color: $text;
+    background: $boost;
+}
+
+.gallery-zoom {
+    margin-left: 2;
+}
+
+.gallery-prev:hover,
+.gallery-prev:focus,
+.gallery-next:hover,
+.gallery-next:focus,
+.gallery-zoom:hover,
+.gallery-zoom:focus {
+    background: $primary;
+    color: $text;
+}
+
+.gallery-prev:disabled,
+.gallery-next:disabled {
+    color: $text-muted;
+}
+
+.gallery-counter {
+    width: auto;
+    height: 1;
+    padding: 0 1;
+    color: $accent;
+    text-style: bold;
+}
+
+.gallery-copy {
+    width: 4;
+    height: 1;
+    min-width: 0;
+    border: none;
+    padding: 0;
+    margin: 0 0 0 1;
+    background: $boost;
+    color: $text;
+    content-align: center middle;
+}
+
+.gallery-copy:hover {
+    background: $primary;
+    color: $text;
 }
 
 .playbtn {
@@ -316,12 +439,6 @@ AnswerHeader {
 .rule {
     color: $border;
     margin: 0 0 1 0;
-}
-
-.math {
-    text-align: center;
-    width: 100%;
-    margin: 1 2;
 }
 
 .imgsec {
@@ -367,7 +484,7 @@ AnswerHeader {
 }
 
 .img-copy:hover {
-    background: $accent;
+    background: $primary;
     color: $text;
 }
 
@@ -402,92 +519,7 @@ AnswerHeader {
     text-style: underline;
 }
 
-/* one-line "expand table" button for wide tables */
-.tablebtn {
-    height: 1;
-    border: none;
-    min-width: 0;
-    padding: 0 2;
-    margin: 1 1 0 1;
-    text-align: left;
-    content-align: left middle;
-    color: $secondary;
-}
-
-/* full-table popup */
-#table-panel {
-    width: 100%;
-    height: 100%;
-    background: $panel;
-    border: round $secondary;
-    padding: 1 1;
-}
-
-#table-scroll {
-    height: 1fr;
-    margin-top: 1;
-    background: $background;
-}
-
-#table-body {
-    width: auto;
-    height: auto;
-    padding: 0 1;
-}
-
-/* block code: full-width background block, semantic colors on light text,
-   0 blank rows around the colored area (no vertical padding) */
-.codeblock {
-    background: $panel;
-    color: $text;
-    padding: 0 2;
-    margin: 0 0 0 1;
-    width: 100%;
-}
-
-/* code block header row: language label + right-aligned copy button */
-.code-head {
-    height: 1;
-    margin: 0 0 0 1;
-    width: 100%;
-}
-
-.code-lang {
-    width: 1fr;
-    height: 1;
-    padding: 0 1 0 2;
-    color: $text-muted;
-    text-style: italic;
-}
-
-.code-copy {
-    width: 4;
-    height: 1;
-    min-width: 0;
-    border: none;
-    padding: 0;
-    background: $boost;
-    color: $text;
-    content-align: center middle;
-}
-
-.code-copy:hover {
-    background: $accent;
-    color: $text;
-}
-
-/* blockquote: full-width background block with a continuous left bar,
-   0 blank rows around the colored area (no vertical padding) */
-.quoteblock {
-    background: $primary-background;
-    border-left: thick $accent;
-    padding: 0 2;
-    margin: 0 0 0 1;
-    width: 100%;
-}
-
-/* 正文段落：内容区本身 0 边距（横线贯通到最左最右），文字距内容区左右各 2 字符；
-   引用块（.quoteblock 类，更高优先级）保持整块通栏 */
+/* 正文段落：内容区本身 0 边距（横线贯通到最左最右），文字距内容区左右各 2 字符 */
 ClickableText {
     margin: 0 2;
 }
@@ -503,7 +535,7 @@ ClickableText:focus {
 }
 
 #open-web,
-#end-next-answer {
+#end-next-note {
     height: 1;
     border: none;
     min-width: 0;
@@ -516,7 +548,7 @@ ClickableText:focus {
     width: 100%;
     height: 100%;
     background: $panel;
-    border: round $accent;
+    border: round $primary;
     padding: 1 1;
 }
 
@@ -550,6 +582,17 @@ ClickableText:focus {
 #comments {
     height: 1fr;
     margin-top: 1;
+}
+
+.comment {
+    margin: 0 1 0 1;
+    padding: 1 0 1 0;
+    border-bottom: solid $border;
+}
+
+.comment-reply {
+    margin: 0 1 0 5;
+    color: $text-muted;
 }
 
 /* URL / search prompt: a compact theme-native panel.  A single container
@@ -621,10 +664,65 @@ UrlPromptScreen {
     background: $background 65%;
 }
 
-.comment {
-    margin: 0 1 0 1;
-    padding: 1 0 1 0;
-    border-bottom: solid $border;
+/* captcha / 风控 popup: one-line buttons */
+VerificationRequiredScreen {
+    align: center top;
+    padding: 0;
+    overflow: hidden;
+    background: $background 65%;
+}
+
+#verify-panel {
+    width: 84;
+    max-width: 94%;
+    height: auto;
+    background: $surface;
+    border: round $warning;
+    padding: 1 2;
+    margin-top: 3;
+}
+
+#verify-title {
+    width: 100%;
+    height: 1;
+    color: $warning;
+    text-style: bold;
+}
+
+#verify-message {
+    width: 100%;
+    height: auto;
+    margin: 1 0;
+    color: $text;
+}
+
+#verify-actions {
+    width: 100%;
+    height: 1;
+    align: left middle;
+}
+
+.verify-btn {
+    width: auto;
+    min-width: 0;
+    height: 1;
+    border: none;
+    padding: 0 2;
+    margin: 0 2 0 0;
+    background: $boost;
+    color: $text;
+}
+
+.verify-btn:hover,
+.verify-btn:focus {
+    background: $accent;
+    color: $text;
+}
+
+#verify-open {
+    background: $primary;
+    color: $text;
+    text-style: bold;
 }
 
 #iviewer-hint {

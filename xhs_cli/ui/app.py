@@ -11,16 +11,22 @@ from textual.binding import Binding
 from textual.screen import Screen
 
 from .. import config, history
-from ..net import FeedItem, NotLoggedIn, ZhihuSession
+from ..net import FeedItem, NotLoggedIn, VerificationRequired, XhsClient
 from .constants import CUSTOM_THEMES
 from .content import ContentScreen
 from .feed import FeedScreen, SearchScreen
-from .modals import SearchPromptScreen, UrlPromptScreen
-from .widgets import BottomBar, push_item_screen
+from .modals import SearchPromptScreen, UrlPromptScreen, VerificationRequiredScreen
+from .widgets import (
+    GRID_CELL_LABELS,
+    GRID_CELL_ORDER,
+    BottomBar,
+    grid_cell_size,
+    push_item_screen,
+)
 
 
-class ZhihuApp(App):
-    TITLE = "知乎"
+class XhsApp(App):
+    TITLE = "小红书"
     CSS_PATH = "../styles.tcss"
     BINDINGS = [
         # hidden from the footer (they live in the command palette / key panel)
@@ -35,12 +41,12 @@ class ZhihuApp(App):
     _MOUSE_ON = "\x1b[?1000h\x1b[?1003h\x1b[?1006h"
     _MOUSE_OFF = "\x1b[?1006l\x1b[?1003l\x1b[?1000l"
 
-    def __init__(self, client: ZhihuSession, user: dict, cell_size=(8, 16),
+    def __init__(self, client: XhsClient, user: dict, cell_size=(8, 16),
                  initial_item: FeedItem | None = None):
         super().__init__()
         for custom_theme in CUSTOM_THEMES:
             self.register_theme(custom_theme)
-        self.theme = "zhihu-dark"
+        self.theme = "xhs-red"
         self.client = client
         self.user = user or {}
         self.cell_size = cell_size
@@ -79,11 +85,11 @@ class ZhihuApp(App):
             "选择内置主题或在 CUSTOM_THEMES 中注册的自定义主题",
             self.action_change_theme,
         )
-        enabled = bool(config.get("expand_images_by_default", False))
+        enabled = bool(config.get("expand_images_by_default", True))
         state = "开" if enabled else "关"
         yield SystemCommand(
-            f"默认展开所有图片：{state}",
-            "切换回答正文中的图片是否在进入页面后自动展开",
+            f"自动加载图集图片：{state}",
+            "进入笔记后是否自动内嵌显示图集的第一张图片",
             self.action_toggle_default_images,
         )
         auto_refresh = bool(config.get("auto_refresh_recommend", False))
@@ -92,17 +98,40 @@ class ZhihuApp(App):
             "开启后每次切回推荐页都会重新请求；关闭时恢复页面缓存",
             self.action_toggle_auto_refresh_recommend,
         )
+        show_images = bool(config.get("feed_show_images", False))
+        yield SystemCommand(
+            f"列表卡片图片：{'开' if show_images else '关'}",
+            "列表模式下在卡片内显示 3:4 封面图（需终端支持图片）",
+            self.action_toggle_feed_images,
+        )
+        view = str(config.get("feed_view", "list") or "list")
+        yield SystemCommand(
+            f"卡片布局：{'宫格' if view == 'grid' else '列表'}",
+            "在纵向列表与宫格视图之间切换（需终端支持图片）",
+            self.action_toggle_feed_view,
+        )
+        yield SystemCommand(
+            f"宫格图片大小：{GRID_CELL_LABELS.get(grid_cell_size(), grid_cell_size())}",
+            "切换宫格单元格大小（小/中/大/特大），列数随终端宽度自适应",
+            self.action_cycle_grid_cell,
+        )
+        photo_first = bool(config.get("note_photo_first", True))
+        yield SystemCommand(
+            f"笔记图文顺序：{'图片优先' if photo_first else '文字优先'}",
+            "图文笔记中先展示图片集、后展示文字（Photo first）",
+            self.action_toggle_note_photo_first,
+        )
         end_button = config.get("content_end_button", "browser")
-        end_labels = {"browser": "在浏览器中打开", "next_answer": "下一个回答", "none": "隐藏"}
+        end_labels = {"browser": "在浏览器中打开", "next_note": "下一条笔记", "none": "隐藏"}
         yield SystemCommand(
             f"尾端按钮：{end_labels.get(end_button, end_button)}",
-            "正文底部尾端按钮：在浏览器中打开 / 下一个回答 / 隐藏",
+            "正文底部尾端按钮：在浏览器中打开 / 下一条笔记 / 隐藏",
             self.action_toggle_end_button,
         )
         history_enabled = bool(config.get("history_enabled", True))
         yield SystemCommand(
             f"浏览历史：{'开' if history_enabled else '关'}",
-            "控制是否记录之后浏览的回答",
+            "控制是否记录之后浏览的笔记",
             self.action_toggle_history,
         )
         persistent = bool(config.get("history_persistent", False))
@@ -114,13 +143,52 @@ class ZhihuApp(App):
         yield SystemCommand("清空当前历史记录", str(history.path()), self.action_clear_history)
 
     def action_toggle_default_images(self):
-        enabled = not bool(config.get("expand_images_by_default", False))
+        enabled = not bool(config.get("expand_images_by_default", True))
         try:
             config.set_value("expand_images_by_default", enabled)
         except Exception as e:
             self.notify(f"保存设置失败：{e}", severity="error", timeout=6)
             return
-        self.notify(f"默认展开所有图片：{'开' if enabled else '关'}", timeout=3)
+        self.notify(f"自动加载图集图片：{'开' if enabled else '关'}", timeout=3)
+
+    # -- list images / grid view (delegated to the active screen) ----------
+
+    def _dispatch_screen_action(self, action: str):
+        handler = getattr(self.screen, f"action_{action}", None)
+        if handler is None:
+            self.notify("当前页面不支持该操作", timeout=3)
+            return
+        handler()
+
+    def action_toggle_feed_images(self):
+        self._dispatch_screen_action("toggle_images")
+
+    def action_toggle_feed_view(self):
+        self._dispatch_screen_action("toggle_view")
+
+    def action_cycle_grid_cell(self):
+        current = grid_cell_size()
+        nxt = GRID_CELL_ORDER[(GRID_CELL_ORDER.index(current) + 1) % len(GRID_CELL_ORDER)]
+        config.set_value("feed_grid_cell", nxt)
+        self.notify(f"宫格图片大小：{GRID_CELL_LABELS.get(nxt, nxt)}", timeout=3)
+        apply_columns = getattr(self.screen, "apply_grid_columns", None)
+        if callable(apply_columns):
+            apply_columns()
+
+    def action_toggle_note_photo_first(self):
+        enabled = not bool(config.get("note_photo_first", True))
+        config.set_value("note_photo_first", enabled)
+        self.notify(f"笔记图文顺序：{'图片优先' if enabled else '文字优先'}", timeout=3)
+        reloader = getattr(self.screen, "reload_layout", None)
+        if callable(reloader):
+            reloader()
+
+    def show_verification_required(self, message: str):
+        """Popup about XHS captcha/风控 with an open-browser button."""
+        for screen in self.screen_stack:
+            if isinstance(screen, VerificationRequiredScreen):
+                return
+        self.push_screen(VerificationRequiredScreen(message))
 
     def action_toggle_auto_refresh_recommend(self):
         enabled = not bool(config.get("auto_refresh_recommend", False))
@@ -132,7 +200,7 @@ class ZhihuApp(App):
         self.notify(f"自动刷新推荐：{'开' if enabled else '关'}", timeout=3)
 
     def action_toggle_end_button(self):
-        order = ("browser", "next_answer", "none")
+        order = ("browser", "next_note", "none")
         current = config.get("content_end_button", "browser")
         current = current if current in order else "browser"
         nxt = order[(order.index(current) + 1) % len(order)]
@@ -141,7 +209,7 @@ class ZhihuApp(App):
         except Exception as exc:
             self.notify(f"保存设置失败：{exc}", severity="error", timeout=6)
             return
-        labels = {"browser": "在浏览器中打开", "next_answer": "下一个回答", "none": "隐藏"}
+        labels = {"browser": "在浏览器中打开", "next_note": "下一条笔记", "none": "隐藏"}
         self.notify(f"尾端按钮：{labels.get(nxt, nxt)}", timeout=3)
 
     def action_toggle_history(self):
@@ -185,6 +253,8 @@ class ZhihuApp(App):
         self.notify("正在打开链接…", timeout=2)
         try:
             item = await asyncio.to_thread(self.client.fetch_url, url)
+        except VerificationRequired as e:
+            self.show_verification_required(str(e))
         except NotLoggedIn as e:
             self.notify(str(e), severity="error", timeout=8)
             return

@@ -1,4 +1,4 @@
-"""Comments popup."""
+"""Comments popup (XHS comments with replies, cursor pagination)."""
 from __future__ import annotations
 
 import asyncio
@@ -11,8 +11,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
-from ..net import FeedItem, NotLoggedIn, ZhihuSession, fmt_num, fmt_time
-from .constants import ICON_COMMENT
+from ..net import Comment, FeedItem, NotLoggedIn, VerificationRequired, XhsClient, fmt_num, fmt_time
+from .constants import ICON_COMMENT, ICON_LIKE
 from .widgets import CommentScroll, StatusLine
 
 
@@ -23,11 +23,11 @@ class CommentsScreen(ModalScreen[None]):
         Binding("k,up", "scroll_up", "", show=False),
     ]
 
-    def __init__(self, client: ZhihuSession, item: FeedItem):
+    def __init__(self, client: XhsClient, item: FeedItem):
         super().__init__()
         self.client = client
         self.item = item
-        self._offset = 0
+        self._cursor = ""
         self.is_end = False
         self._loading = False
 
@@ -36,7 +36,8 @@ class CommentsScreen(ModalScreen[None]):
         yield Vertical(
             Horizontal(
                 Static(
-                    f" {ICON_COMMENT} · {self.item.author or '匿名用户'}{('（' + count + '）') if count else ''}",
+                    f" {ICON_COMMENT} · {self.item.title or self.item.author or '笔记'}"
+                    f"{('（' + count + '）') if count else ''}",
                     classes="cmt-head",
                 ),
                 Button(" 返回 ", id="comments-close", classes="cmt-close"),
@@ -55,10 +56,16 @@ class CommentsScreen(ModalScreen[None]):
         self.run_worker(self._load(), name="cmt", group="cmt", exclusive=True)
 
     def _busy(self, text: str = "加载中…"):
-        self.query_one("#status", StatusLine).busy(text)
+        try:
+            self.query_one("#status", StatusLine).busy(text)
+        except Exception:
+            pass
 
     def _idle(self):
-        self.query_one("#status", StatusLine).idle()
+        try:
+            self.query_one("#status", StatusLine).idle()
+        except Exception:
+            pass
 
     async def _load(self):
         if self._loading or self.is_end:
@@ -66,18 +73,25 @@ class CommentsScreen(ModalScreen[None]):
         self._loading = True
         self._busy("加载评论…")
         try:
-            comments, is_end = await asyncio.to_thread(
-                self.client.answer_comments, self.item.aid, self._offset
+            comments, cursor, has_more = await asyncio.to_thread(
+                self.client.note_comments,
+                self.item.rid,
+                self._cursor,
+                self.item.xsec_token,
             )
             box = self.query_one("#comments")
-            if self._offset == 0:
+            if self._cursor == "":
                 box.remove_children()
-            if not comments and self._offset == 0:
+            if not comments and self._cursor == "":
                 box.mount(Static(" （暂无评论）", classes="hint"))
-            for c in comments:
-                box.mount(self._comment_static(c))
-            self._offset += len(comments)
-            self.is_end = is_end
+            for comment in comments:
+                box.mount(self._comment_static(comment))
+                for reply in comment.replies:
+                    box.mount(self._comment_static(reply, reply=True))
+            self._cursor = cursor
+            self.is_end = has_more is False or (not comments and not cursor)
+        except VerificationRequired as e:
+            self.app.show_verification_required(str(e))
         except NotLoggedIn as e:
             self.notify(str(e), severity="error", timeout=8)
             self.is_end = True
@@ -97,18 +111,22 @@ class CommentsScreen(ModalScreen[None]):
             )
 
     @staticmethod
-    def _comment_static(c) -> Static:
+    def _comment_static(comment: Comment, reply: bool = False) -> Static:
         t = Text()
-        t.append(f"{c.author or '匿名'}", style="bold #eab308")
-        if c.reply_to:
-            t.append(f" → {c.reply_to}", style="#8a93a3")
-        if c.votes:
-            t.append(f"  ▲ {fmt_num(c.votes)}", style="#34d399")
-        if c.created:
-            t.append(f"  {fmt_time(c.created)}", style="#8a93a3")
+        if reply:
+            t.append("  ↳ ", style="#8a7580")
+        t.append(f"{comment.author or '未知用户'}", style="bold #ffb3c1")
+        if comment.votes:
+            t.append(f"  {ICON_LIKE} {fmt_num(comment.votes)}", style="#ff4d6d")
+        if comment.created:
+            t.append(f"  {fmt_time(comment.created)}", style="#b9a3aa")
+        if comment.ip:
+            t.append(f"  IP {comment.ip}", style="#b9a3aa")
+        if reply:
+            t.append("  作者/回复", style="#8a7580")
         t.append("\n")
-        t.append(c.content, style="#c8d0dc")
-        return Static(t, classes="comment")
+        t.append(comment.content, style="#e8dde1")
+        return Static(t, classes="comment comment-reply" if reply else "comment")
 
     def action_close(self):
         self.dismiss(None)

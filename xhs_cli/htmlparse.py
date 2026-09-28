@@ -204,13 +204,12 @@ def formula_img_visible(img: Tag) -> bool:
 
 
 def is_inline_equation(img: Tag) -> bool:
-    """eeimg='1' marks inline formulas; block formulas have no eeimg.
+    """Zhihu's ``eeimg=1`` is authoritative for inline equations.
 
-    Multi-line constructs (\\begin{...}) are always treated as display math.
+    Inline matrices/cases are flattened by :mod:`mathtex`; formulas without
+    the marker retain utftex's multi-line display rendering.
     """
-    if img.get("eeimg") != "1":
-        return False
-    return "\\begin{" not in equation_latex(img)
+    return img.get("eeimg") == "1"
 
 
 def equation_latex(img: Tag) -> str:
@@ -291,8 +290,10 @@ def inline(node: Tag, links: list[tuple[int, int, str]] | None = None) -> Text:
                 continue
             if name == "img":
                 if is_equation(child):
-                    # inline formulas stay in the paragraph flow
-                    t.append_text(math_text(child, inline=True))
+                    # Only explicitly inline formulas belong in paragraph
+                    # flow. Display formulas are emitted by the block walker.
+                    if is_inline_equation(child):
+                        t.append_text(math_text(child, inline=True))
                     continue
                 # display formulas are extracted by the block walker
                 if not is_inline_equation(child):

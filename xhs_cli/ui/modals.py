@@ -1,5 +1,7 @@
-"""Modal dialogs: search prompt, table viewer, url prompt."""
+"""Modal dialogs: search prompt, table viewer, url prompt, captcha verify."""
 from __future__ import annotations
+
+import webbrowser
 
 from rich.cells import cell_len
 from rich.text import Text
@@ -12,16 +14,62 @@ from textual.widgets import Button, Input, Static
 
 from .constants import ICON_CANCEL, ICON_OPEN
 
+VERIFY_URL = "https://www.xiaohongshu.com/explore"
+
+
+class VerificationRequiredScreen(ModalScreen[None]):
+    """Captcha / 风控 popup with a one-line button that opens the browser."""
+
+    BINDINGS = [
+        Binding("escape,q", "close", "关闭"),
+        Binding("o", "open_browser", "浏览器验证"),
+    ]
+
+    def __init__(self, message: str, url: str = VERIFY_URL):
+        super().__init__()
+        self.message = message
+        self.url = url
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static(" 需要完成小红书安全验证 ", id="verify-title"),
+            Static(self.message, id="verify-message"),
+            Horizontal(
+                Button(
+                    " 在浏览器中验证 ",
+                    id="verify-open",
+                    classes="verify-btn verify-open",
+                ),
+                Button(" 关闭 ", id="verify-close", classes="verify-btn"),
+                id="verify-actions",
+            ),
+            id="verify-panel",
+        )
+
+    @on(Button.Pressed, "#verify-open")
+    def _verify_open(self, event: Button.Pressed):
+        webbrowser.open(self.url)
+
+    @on(Button.Pressed, "#verify-close")
+    def _verify_close(self, event: Button.Pressed):
+        self.dismiss(None)
+
+    def action_open_browser(self):
+        webbrowser.open(self.url)
+
+    def action_close(self):
+        self.dismiss(None)
+
 
 class SearchPromptScreen(ModalScreen[str]):
-    """Modal input: search answers/questions (Ctrl+S)."""
+    """Modal input: search notes (Ctrl+S)."""
 
     BINDINGS = [Binding("escape", "cancel", "取消")]
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
             Input(
-                placeholder="搜索问题 / 回答 / 文章…",
+                placeholder="搜索笔记 / 话题…",
                 id="search-input",
                 classes="prompt-input",
             ),
@@ -127,14 +175,14 @@ class TableScreen(ModalScreen[None]):
 
 
 class UrlPromptScreen(ModalScreen[str]):
-    """Modal input: paste a zhihu link to open it (Ctrl+O)."""
+    """Modal input: paste a Xiaohongshu link to open it (Ctrl+O)."""
 
     BINDINGS = [Binding("escape", "cancel", "取消")]
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
             Input(
-                placeholder="https://www.zhihu.com/question/123/answer/456",
+                placeholder="https://www.xiaohongshu.com/explore/…",
                 id="url-input",
                 classes="prompt-input",
             ),
